@@ -195,7 +195,7 @@ export function VetDashboard() {
                     {formatTime(a.time)}
                   </span>
                   {a.pet.photo ? (
-                    // eslint-disable-next-line @next/next/no-img-element
+                     
                     <img
                       src={a.pet.photo}
                       alt={a.pet.name}

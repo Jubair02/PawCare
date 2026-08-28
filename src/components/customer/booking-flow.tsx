@@ -307,7 +307,7 @@ function InlineAddPetDialog({
             <Label htmlFor="book-pet-photo">Photo</Label>
             <div className="flex items-center gap-3">
               {form.photo ? (
-                // eslint-disable-next-line @next/next/no-img-element
+                 
                 <img
                   src={form.photo}
                   alt="Pet preview"
@@ -738,7 +738,7 @@ export function BookingFlow() {
                       aria-pressed={petId === pet.id}
                     >
                       {pet.photo ? (
-                        // eslint-disable-next-line @next/next/no-img-element
+                         
                         <img
                           src={pet.photo}
                           alt={pet.name}

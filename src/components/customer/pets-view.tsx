@@ -7,6 +7,7 @@ import {
   CalendarDays,
   Cake,
   Loader2,
+  PawPrint,
   Pencil,
   Plus,
   Scale,
@@ -339,7 +340,7 @@ function PetFormDialog({
             <Label htmlFor="pet-photo">Photo</Label>
             <div className="flex items-center gap-3">
               {form.photo ? (
-                // eslint-disable-next-line @next/next/no-img-element
+                 
                 <img
                   src={form.photo}
                   alt="Pet preview"
@@ -409,7 +410,7 @@ function PetCard({
       >
         <div className="relative h-32 w-full overflow-hidden rounded-t-2xl">
           {pet.photo ? (
-            // eslint-disable-next-line @next/next/no-img-element
+             
             <img src={pet.photo} alt={pet.name} className="h-full w-full object-cover" />
           ) : (
             <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-emerald-600 to-teal-500 text-5xl">

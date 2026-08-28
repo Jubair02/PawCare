@@ -267,7 +267,7 @@ function EditPetDialog({
             <Label htmlFor="detail-pet-photo">Photo</Label>
             <div className="flex items-center gap-3">
               {photo ? (
-                // eslint-disable-next-line @next/next/no-img-element
+                 
                 <img
                   src={photo}
                   alt="Pet preview"
@@ -373,7 +373,7 @@ export function PetDetailView() {
           <div className="flex flex-col gap-6 sm:flex-row">
             <div className="shrink-0">
               {pet.photo ? (
-                // eslint-disable-next-line @next/next/no-img-element
+                 
                 <img
                   src={pet.photo}
                   alt={pet.name}

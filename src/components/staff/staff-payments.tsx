@@ -1,0 +1,295 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { CircleCheck, Info, Receipt, RefreshCcwDot, ReceiptText } from "lucide-react";
+import { motion } from "framer-motion";
+import { toast } from "sonner";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Card } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { EmptyState } from "@/components/shared/empty-state";
+import { SectionHeader } from "@/components/shared/section-header";
+import { StatCard } from "@/components/shared/stat-card";
+import { StatusBadge } from "@/components/shared/status-badge";
+import { apiFetch } from "@/lib/api";
+import { PAYMENT_METHODS } from "@/lib/constants";
+import { formatBDT, formatDate, formatTime, timeAgo } from "@/lib/formatters";
+import type { PaymentDTO } from "@/lib/types";
+
+const STATUS_OPTIONS = ["UNPAID", "PAID", "REFUNDED"];
+const METHOD_OPTIONS = ["CASH", "CARD", "MOBILE"];
+
+function todayStr(): string {
+  const n = new Date();
+  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+}
+
+function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : "Something went wrong";
+}
+
+function methodLabel(method: string): string {
+  return PAYMENT_METHODS.find((m) => m.value === method)?.label ?? method;
+}
+
+export function StaffPaymentsView() {
+  const [payments, setPayments] = useState<PaymentDTO[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [methodFilter, setMethodFilter] = useState<string>("ALL");
+
+  const load = useCallback(async () => {
+    try {
+      const res = await apiFetch<{ payments: PaymentDTO[] }>("/api/payments");
+      setPayments(res.payments);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const stats = useMemo(() => {
+    const today = todayStr();
+    let collected = 0;
+    let todayTotal = 0;
+    let refunded = 0;
+    for (const p of payments) {
+      if (p.status === "PAID") {
+        collected += p.amount;
+        if (p.paidAt.slice(0, 10) === today) todayTotal += p.amount;
+      } else if (p.status === "REFUNDED") {
+        refunded += p.amount;
+      }
+    }
+    return { collected, todayTotal, refunded, count: payments.length };
+  }, [payments]);
+
+  const filtered = useMemo(() => {
+    let list = payments;
+    if (statusFilter !== "ALL") list = list.filter((p) => p.status === statusFilter);
+    if (methodFilter !== "ALL") list = list.filter((p) => p.method === methodFilter);
+    return list;
+  }, [payments, statusFilter, methodFilter]);
+
+  return (
+    <div className="space-y-4">
+      <SectionHeader
+        title="Payments"
+        description="Every invoice at the clinic — collections, refunds and transaction references."
+      />
+
+      {/* Stats */}
+      <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+        {loading ? (
+          Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-24 rounded-2xl" />)
+        ) : (
+          <>
+            <StatCard
+              title="Total Collected"
+              value={formatBDT(stats.collected)}
+              icon={<CircleCheck />}
+              hint="Sum of paid invoices"
+              tone="teal"
+            />
+            <StatCard
+              title="Collected Today"
+              value={formatBDT(stats.todayTotal)}
+              icon={<Receipt />}
+              hint="Paid earlier today"
+            />
+            <StatCard
+              title="Transactions"
+              value={stats.count}
+              icon={<ReceiptText />}
+              hint="All payment records"
+              tone="violet"
+            />
+            <StatCard
+              title="Refunded"
+              value={formatBDT(stats.refunded)}
+              icon={<RefreshCcwDot />}
+              hint="Returned to customers"
+              tone="amber"
+            />
+          </>
+        )}
+      </section>
+
+      <Alert>
+        <Info className="size-4" />
+        <AlertDescription>
+          Record payments from the Appointments page — open an appointment and use its payment
+          action.
+        </AlertDescription>
+      </Alert>
+
+      {/* Filters */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-full sm:w-44" aria-label="Filter by payment status">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">All statuses</SelectItem>
+            {STATUS_OPTIONS.map((s) => (
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={methodFilter} onValueChange={setMethodFilter}>
+          <SelectTrigger className="w-full sm:w-44" aria-label="Filter by payment method">
+            <SelectValue placeholder="Method" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">All methods</SelectItem>
+            {METHOD_OPTIONS.map((m) => (
+              <SelectItem key={m} value={m}>
+                {methodLabel(m)}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span className="text-sm text-muted-foreground sm:ml-auto">
+          {filtered.length} of {payments.length} shown
+        </span>
+      </div>
+
+      {loading ? (
+        <div className="space-y-3">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-16 rounded-2xl" />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon={<Receipt />}
+          title={payments.length === 0 ? "No payments yet" : "No matching payments"}
+          description={
+            payments.length === 0
+              ? "Payments recorded from the Appointments page will appear here."
+              : "Try clearing the status or method filter."
+          }
+        />
+      ) : (
+        <>
+          {/* Table — md and up */}
+          <div className="hidden overflow-x-auto rounded-2xl border md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Invoice</TableHead>
+                  <TableHead>Paid</TableHead>
+                  <TableHead>Customer</TableHead>
+                  <TableHead>Service</TableHead>
+                  <TableHead>Pet</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead>Method</TableHead>
+                  <TableHead>Transaction</TableHead>
+                  <TableHead className="text-right">Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((p) => (
+                  <TableRow key={p.id}>
+                    <TableCell className="font-mono text-xs font-semibold">{p.invoiceId}</TableCell>
+                    <TableCell>
+                      <span className="block whitespace-nowrap text-sm">
+                        {formatDate(p.paidAt.slice(0, 10))}
+                      </span>
+                      <span className="whitespace-nowrap text-xs text-muted-foreground">
+                        {formatTime(p.paidAt.slice(11, 16))} · {timeAgo(p.paidAt)}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="block max-w-36 truncate font-medium">{p.customer.name}</span>
+                      <span className="block max-w-36 truncate text-xs text-muted-foreground">
+                        {p.customer.email}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="block max-w-40 truncate">
+                        {p.appointment.service.icon} {p.appointment.service.name}
+                      </span>
+                    </TableCell>
+                    <TableCell>{p.appointment.pet.name}</TableCell>
+                    <TableCell className="text-right font-semibold">{formatBDT(p.amount)}</TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {methodLabel(p.method)}
+                    </TableCell>
+                    <TableCell className="font-mono text-[11px] text-muted-foreground">
+                      {p.transactionId}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <StatusBadge status={p.status} />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Cards — mobile */}
+          <div className="grid gap-3 md:hidden">
+            {filtered.map((p) => (
+              <motion.div
+                key={p.id}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                <Card className="p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-mono text-xs font-semibold text-muted-foreground">
+                        {p.invoiceId}
+                      </p>
+                      <p className="mt-0.5 truncate text-sm font-semibold">
+                        {p.appointment.service.icon} {p.appointment.service.name}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {p.customer.name} · {p.appointment.pet.name}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold">{formatBDT(p.amount)}</p>
+                      <StatusBadge status={p.status} className="mt-1" />
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-xs text-muted-foreground">
+                    <span>
+                      {methodLabel(p.method)} · {formatDate(p.paidAt.slice(0, 10))}{" "}
+                      {formatTime(p.paidAt.slice(11, 16))}
+                    </span>
+                    <span className="font-mono text-[11px]">{p.transactionId}</span>
+                  </div>
+                </Card>
+              </motion.div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

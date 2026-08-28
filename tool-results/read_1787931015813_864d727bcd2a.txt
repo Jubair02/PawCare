@@ -1,0 +1,990 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useState } from "react";
+     4→import type { ChangeEvent } from "react";
+     5→import { AnimatePresence, motion } from "framer-motion";
+     6→import {
+     7→  ArrowLeft,
+     8→  ArrowRight,
+     9→  BadgeCheck,
+    10→  CalendarClock,
+    11→  CalendarDays,
+    12→  Check,
+    13→  CircleAlert,
+    14→  Loader2,
+    15→  Plus,
+    16→  Star,
+    17→} from "lucide-react";
+    18→import { toast } from "sonner";
+    19→import { Button } from "@/components/ui/button";
+    20→import { Card } from "@/components/ui/card";
+    21→import {
+    22→  Dialog,
+    23→  DialogContent,
+    24→  DialogDescription,
+    25→  DialogFooter,
+    26→  DialogHeader,
+    27→  DialogTitle,
+    28→} from "@/components/ui/dialog";
+    29→import { Input } from "@/components/ui/input";
+    30→import { Label } from "@/components/ui/label";
+    31→import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+    32→import {
+    33→  Select,
+    34→  SelectContent,
+    35→  SelectItem,
+    36→  SelectTrigger,
+    37→  SelectValue,
+    38→} from "@/components/ui/select";
+    39→import { Separator } from "@/components/ui/separator";
+    40→import { Skeleton } from "@/components/ui/skeleton";
+    41→import { Textarea } from "@/components/ui/textarea";
+    42→import { apiFetch } from "@/lib/api";
+    43→import { PAYMENT_METHODS, PET_TYPES, VACCINATION_STATUSES } from "@/lib/constants";
+    44→import { formatBDT, formatDate, formatTime, initials, petEmoji } from "@/lib/formatters";
+    45→import { useAppStore } from "@/lib/store";
+    46→import type { AppointmentDTO, PaymentDTO, PetDTO, ProviderDTO, ServiceDTO } from "@/lib/types";
+    47→import { cn } from "@/lib/utils";
+    48→import { EmptyState } from "@/components/shared/empty-state";
+    49→import { StatusBadge } from "@/components/shared/status-badge";
+    50→
+    51→const MAX_PHOTO_BYTES = 400 * 1024; // 400KB
+    52→const STEPS = ["Service", "Pet", "Provider", "Date & time", "Confirm"];
+    53→
+    54→const CATEGORY_TILE: Record<string, string> = {
+    55→  MEDICAL: "bg-gradient-to-br from-emerald-600 to-teal-500",
+    56→  GROOMING: "bg-gradient-to-br from-amber-400 to-amber-500",
+    57→  DIAGNOSTIC: "bg-gradient-to-br from-violet-500 to-violet-600",
+    58→};
+    59→
+    60→function todayStr(): string {
+    61→  const n = new Date();
+    62→  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(
+    63→    n.getDate()
+    64→  ).padStart(2, "0")}`;
+    65→}
+    66→
+    67→function Stars({ value, count }: { value: number | null | undefined; count?: number }) {
+    68→  if (value === null || value === undefined) {
+    69→    return <span className="text-xs text-muted-foreground">No reviews yet</span>;
+    70→  }
+    71→  return (
+    72→    <span className="flex items-center gap-1" aria-label={`Rated ${value} out of 5`}>
+    73→      <Star className="size-3.5 fill-amber-400 text-amber-400" />
+    74→      <span className="text-xs font-semibold">{value.toFixed(1)}</span>
+    75→      {count !== undefined ? <span className="text-xs text-muted-foreground">({count})</span> : null}
+    76→    </span>
+    77→  );
+    78→}
+    79→
+    80→function StepHint({ show, children }: { show: boolean; children: React.ReactNode }) {
+    81→  if (!show) return null;
+    82→  return (
+    83→    <p className="flex items-center justify-end gap-1 text-xs text-amber-600">
+    84→      <CircleAlert className="size-3.5" /> {children}
+    85→    </p>
+    86→  );
+    87→}
+    88→
+    89→// ---------- Step 2 inline add-pet dialog ----------
+    90→
+    91→interface NewPetForm {
+    92→  name: string;
+    93→  type: string;
+    94→  breed: string;
+    95→  gender: string;
+    96→  birthDate: string;
+    97→  weight: string;
+    98→  color: string;
+    99→  vaccinationStatus: string;
+   100→  medicalNotes: string;
+   101→  photo: string;
+   102→}
+   103→
+   104→const EMPTY_NEW_PET: NewPetForm = {
+   105→  name: "",
+   106→  type: "DOG",
+   107→  breed: "",
+   108→  gender: "MALE",
+   109→  birthDate: "",
+   110→  weight: "",
+   111→  color: "",
+   112→  vaccinationStatus: "NONE",
+   113→  medicalNotes: "",
+   114→  photo: "",
+   115→};
+   116→
+   117→function InlineAddPetDialog({
+   118→  open,
+   119→  onOpenChange,
+   120→  onCreated,
+   121→}: {
+   122→  open: boolean;
+   123→  onOpenChange: (v: boolean) => void;
+   124→  onCreated: (pet: PetDTO) => void;
+   125→}) {
+   126→  const [form, setForm] = useState<NewPetForm>(EMPTY_NEW_PET);
+   127→  const [saving, setSaving] = useState(false);
+   128→  const [nameError, setNameError] = useState<string | null>(null);
+   129→
+   130→  useEffect(() => {
+   131→    if (open) {
+   132→      setForm(EMPTY_NEW_PET);
+   133→      setNameError(null);
+   134→    }
+   135→  }, [open]);
+   136→
+   137→  const set = (key: keyof NewPetForm, value: string) => setForm((f) => ({ ...f, [key]: value }));
+   138→
+   139→  function handlePhoto(e: ChangeEvent<HTMLInputElement>) {
+   140→    const file = e.target.files?.[0];
+   141→    if (!file) return;
+   142→    if (!file.type.startsWith("image/")) {
+   143→      toast.error("Please choose an image file");
+   144→      e.target.value = "";
+   145→      return;
+   146→    }
+   147→    if (file.size > MAX_PHOTO_BYTES) {
+   148→      toast.error("Image is too large — please pick one under 400KB");
+   149→      e.target.value = "";
+   150→      return;
+   151→    }
+   152→    const reader = new FileReader();
+   153→    reader.onload = () => set("photo", String(reader.result ?? ""));
+   154→    reader.readAsDataURL(file);
+   155→  }
+   156→
+   157→  async function handleCreate() {
+   158→    if (!form.name.trim()) {
+   159→      setNameError("Pet name is required");
+   160→      return;
+   161→    }
+   162→    setSaving(true);
+   163→    try {
+   164→      const res = await apiFetch<{ pet: PetDTO }>("/api/pets", {
+   165→        method: "POST",
+   166→        body: {
+   167→          name: form.name.trim(),
+   168→          type: form.type,
+   169→          breed: form.breed.trim() || undefined,
+   170→          gender: form.gender,
+   171→          birthDate: form.birthDate || undefined,
+   172→          weight: form.weight ? Number(form.weight) : undefined,
+   173→          color: form.color.trim() || undefined,
+   174→          vaccinationStatus: form.vaccinationStatus,
+   175→          medicalNotes: form.medicalNotes.trim() || undefined,
+   176→          photo: form.photo || undefined,
+   177→        },
+   178→      });
+   179→      toast.success(`${res.pet.name} added`);
+   180→      onOpenChange(false);
+   181→      onCreated(res.pet);
+   182→    } catch (err) {
+   183→      toast.error((err as Error).message);
+   184→    } finally {
+   185→      setSaving(false);
+   186→    }
+   187→  }
+   188→
+   189→  return (
+   190→    <Dialog open={open} onOpenChange={onOpenChange}>
+   191→      <DialogContent className="max-h-[90vh] overflow-y-auto scrollbar-thin sm:max-w-lg">
+   192→        <DialogHeader>
+   193→          <DialogTitle>Add a new pet</DialogTitle>
+   194→          <DialogDescription>
+   195→            Tell us about your companion so we can care for them better.
+   196→          </DialogDescription>
+   197→        </DialogHeader>
+   198→        <div className="grid gap-4">
+   199→          <div className="grid gap-2">
+   200→            <Label htmlFor="book-pet-name">
+   201→              Name <span className="text-destructive">*</span>
+   202→            </Label>
+   203→            <Input
+   204→              id="book-pet-name"
+   205→              value={form.name}
+   206→              onChange={(e) => {
+   207→                set("name", e.target.value);
+   208→                if (nameError) setNameError(null);
+   209→              }}
+   210→              placeholder="e.g. Bruno"
+   211→              aria-invalid={!!nameError}
+   212→            />
+   213→            {nameError ? <p className="text-xs text-destructive">{nameError}</p> : null}
+   214→          </div>
+   215→          <div className="grid gap-4 sm:grid-cols-2">
+   216→            <div className="grid gap-2">
+   217→              <Label>Type</Label>
+   218→              <Select value={form.type} onValueChange={(v) => set("type", v)}>
+   219→                <SelectTrigger className="w-full">
+   220→                  <SelectValue placeholder="Select type" />
+   221→                </SelectTrigger>
+   222→                <SelectContent>
+   223→                  {PET_TYPES.map((t) => (
+   224→                    <SelectItem key={t.value} value={t.value}>
+   225→                      {t.emoji} {t.label}
+   226→                    </SelectItem>
+   227→                  ))}
+   228→                </SelectContent>
+   229→              </Select>
+   230→            </div>
+   231→            <div className="grid gap-2">
+   232→              <Label htmlFor="book-pet-breed">Breed</Label>
+   233→              <Input
+   234→                id="book-pet-breed"
+   235→                value={form.breed}
+   236→                onChange={(e) => set("breed", e.target.value)}
+   237→                placeholder="e.g. Poodle"
+   238→              />
+   239→            </div>
+   240→          </div>
+   241→          <div className="grid gap-2">
+   242→            <Label>Gender</Label>
+   243→            <RadioGroup value={form.gender} onValueChange={(v) => set("gender", v)} className="flex gap-6">
+   244→              <div className="flex items-center gap-2">
+   245→                <RadioGroupItem value="MALE" id="book-gender-male" />
+   246→                <Label htmlFor="book-gender-male" className="font-normal">
+   247→                  Male
+   248→                </Label>
+   249→              </div>
+   250→              <div className="flex items-center gap-2">
+   251→                <RadioGroupItem value="FEMALE" id="book-gender-female" />
+   252→                <Label htmlFor="book-gender-female" className="font-normal">
+   253→                  Female
+   254→                </Label>
+   255→              </div>
+   256→            </RadioGroup>
+   257→          </div>
+   258→          <div className="grid gap-4 sm:grid-cols-2">
+   259→            <div className="grid gap-2">
+   260→              <Label htmlFor="book-pet-birth">Birth date</Label>
+   261→              <Input
+   262→                id="book-pet-birth"
+   263→                type="date"
+   264→                value={form.birthDate}
+   265→                onChange={(e) => set("birthDate", e.target.value)}
+   266→              />
+   267→            </div>
+   268→            <div className="grid gap-2">
+   269→              <Label htmlFor="book-pet-weight">Weight (kg)</Label>
+   270→              <Input
+   271→                id="book-pet-weight"
+   272→                type="number"
+   273→                min="0"
+   274→                step="0.1"
+   275→                value={form.weight}
+   276→                onChange={(e) => set("weight", e.target.value)}
+   277→                placeholder="e.g. 12.5"
+   278→              />
+   279→            </div>
+   280→          </div>
+   281→          <div className="grid gap-2">
+   282→            <Label>Vaccination status</Label>
+   283→            <Select value={form.vaccinationStatus} onValueChange={(v) => set("vaccinationStatus", v)}>
+   284→              <SelectTrigger className="w-full">
+   285→                <SelectValue placeholder="Select status" />
+   286→              </SelectTrigger>
+   287→              <SelectContent>
+   288→                {VACCINATION_STATUSES.map((v) => (
+   289→                  <SelectItem key={v.value} value={v.value}>
+   290→                    {v.label}
+   291→                  </SelectItem>
+   292→                ))}
+   293→              </SelectContent>
+   294→            </Select>
+   295→          </div>
+   296→          <div className="grid gap-2">
+   297→            <Label htmlFor="book-pet-notes">Medical notes</Label>
+   298→            <Textarea
+   299→              id="book-pet-notes"
+   300→              value={form.medicalNotes}
+   301→              onChange={(e) => set("medicalNotes", e.target.value)}
+   302→              placeholder="Allergies, chronic conditions, medication..."
+   303→              rows={3}
+   304→            />
+   305→          </div>
+   306→          <div className="grid gap-2">
+   307→            <Label htmlFor="book-pet-photo">Photo</Label>
+   308→            <div className="flex items-center gap-3">
+   309→              {form.photo ? (
+   310→                 
+   311→                <img
+   312→                  src={form.photo}
+   313→                  alt="Pet preview"
+   314→                  className="h-14 w-14 rounded-xl border object-cover"
+   315→                />
+   316→              ) : (
+   317→                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 text-2xl">
+   318→                  {petEmoji(form.type)}
+   319→                </div>
+   320→              )}
+   321→              <Input
+   322→                id="book-pet-photo"
+   323→                type="file"
+   324→                accept="image/*"
+   325→                onChange={handlePhoto}
+   326→                className="h-11"
+   327→              />
+   328→            </div>
+   329→            <p className="text-xs text-muted-foreground">JPG or PNG, up to 400KB.</p>
+   330→          </div>
+   331→        </div>
+   332→        <DialogFooter>
+   333→          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving} className="min-h-11">
+   334→            Cancel
+   335→          </Button>
+   336→          <Button onClick={handleCreate} disabled={saving} className="min-h-11">
+   337→            {saving ? <Loader2 className="animate-spin" /> : null}
+   338→            Add pet
+   339→          </Button>
+   340→        </DialogFooter>
+   341→      </DialogContent>
+   342→    </Dialog>
+   343→  );
+   344→}
+   345→
+   346→// ---------- Payment dialog (post-booking) ----------
+   347→
+   348→function PaymentDialog({
+   349→  appointment,
+   350→  open,
+   351→  onOpenChange,
+   352→  onDone,
+   353→}: {
+   354→  appointment: AppointmentDTO | null;
+   355→  open: boolean;
+   356→  onOpenChange: (v: boolean) => void;
+   357→  onDone: () => void;
+   358→}) {
+   359→  const [method, setMethod] = useState("CASH");
+   360→  const [paying, setPaying] = useState(false);
+   361→
+   362→  useEffect(() => {
+   363→    if (open) setMethod("CASH");
+   364→  }, [open]);
+   365→
+   366→  async function handlePay() {
+   367→    if (!appointment) return;
+   368→    setPaying(true);
+   369→    try {
+   370→      await apiFetch<{ payment: PaymentDTO; appointment: AppointmentDTO }>("/api/payments", {
+   371→        method: "POST",
+   372→        body: { appointmentId: appointment.id, method },
+   373→      });
+   374→      toast.success("Payment successful 🎉");
+   375→      onOpenChange(false);
+   376→      onDone();
+   377→    } catch (err) {
+   378→      toast.error((err as Error).message);
+   379→    } finally {
+   380→      setPaying(false);
+   381→    }
+   382→  }
+   383→
+   384→  return (
+   385→    <Dialog open={open} onOpenChange={onOpenChange}>
+   386→      <DialogContent className="sm:max-w-md">
+   387→        <DialogHeader>
+   388→          <DialogTitle>Pay for your appointment</DialogTitle>
+   389→          <DialogDescription>
+   390→            {appointment ? `${appointment.service.name} — ${formatBDT(appointment.price)}` : ""}
+   391→          </DialogDescription>
+   392→        </DialogHeader>
+   393→        <RadioGroup value={method} onValueChange={setMethod} className="gap-3">
+   394→          {PAYMENT_METHODS.map((pm) => (
+   395→            <Label
+   396→              key={pm.value}
+   397→              htmlFor={`pay-${pm.value}`}
+   398→              className={cn(
+   399→                "flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border p-3 font-normal transition-colors",
+   400→                method === pm.value ? "border-primary bg-primary/5" : "hover:bg-muted/50"
+   401→              )}
+   402→            >
+   403→              <RadioGroupItem value={pm.value} id={`pay-${pm.value}`} />
+   404→              {pm.label}
+   405→            </Label>
+   406→          ))}
+   407→        </RadioGroup>
+   408→        <DialogFooter>
+   409→          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={paying} className="min-h-11">
+   410→            Cancel
+   411→          </Button>
+   412→          <Button onClick={handlePay} disabled={paying} className="min-h-11">
+   413→            {paying ? <Loader2 className="animate-spin" /> : <BadgeCheck />}
+   414→            Pay {appointment ? formatBDT(appointment.price) : ""}
+   415→          </Button>
+   416→        </DialogFooter>
+   417→      </DialogContent>
+   418→    </Dialog>
+   419→  );
+   420→}
+   421→
+   422→// ---------- Main booking flow ----------
+   423→
+   424→export function BookingFlow() {
+   425→  const setView = useAppStore((s) => s.setView);
+   426→  const [step, setStep] = useState(1);
+   427→  const [booked, setBooked] = useState<AppointmentDTO | null>(null);
+   428→  const [payOpen, setPayOpen] = useState(false);
+   429→
+   430→  // selections
+   431→  const [serviceId, setServiceId] = useState<string | null>(null);
+   432→  const [petId, setPetId] = useState<string | null>(null);
+   433→  const [providerId, setProviderId] = useState<string | null>(null);
+   434→  const [date, setDate] = useState(todayStr());
+   435→  const [time, setTime] = useState<string | null>(null);
+   436→  const [notes, setNotes] = useState("");
+   437→
+   438→  // data
+   439→  const [services, setServices] = useState<ServiceDTO[] | null>(null);
+   440→  const [pets, setPets] = useState<PetDTO[] | null>(null);
+   441→  const [providers, setProviders] = useState<ProviderDTO[] | null>(null);
+   442→  const [slots, setSlots] = useState<string[] | null>(null);
+   443→  const [slotsLoading, setSlotsLoading] = useState(false);
+   444→  const [addPetOpen, setAddPetOpen] = useState(false);
+   445→  const [submitting, setSubmitting] = useState(false);
+   446→
+   447→  const selectedService = services?.find((s) => s.id === serviceId) ?? null;
+   448→  const selectedPet = pets?.find((p) => p.id === petId) ?? null;
+   449→  const selectedProvider = providers?.find((p) => p.id === providerId) ?? null;
+   450→
+   451→  useEffect(() => {
+   452→    apiFetch<{ services: ServiceDTO[] }>("/api/services?active=true")
+   453→      .then((r) => setServices(r.services))
+   454→      .catch((err: Error) => toast.error(err.message));
+   455→  }, []);
+   456→
+   457→  useEffect(() => {
+   458→    if (step !== 2) return;
+   459→    apiFetch<{ pets: PetDTO[] }>("/api/pets")
+   460→      .then((r) => setPets(r.pets))
+   461→      .catch((err: Error) => toast.error(err.message));
+   462→  }, [step, addPetOpen]);
+   463→
+   464→  useEffect(() => {
+   465→    if (step !== 3 || !selectedService) return;
+   466→    const specialty = selectedService.category === "GROOMING" ? "GROOMER" : "VET";
+   467→    setProviders(null);
+   468→    setProviderId(null);
+   469→    apiFetch<{ providers: ProviderDTO[] }>(`/api/providers?specialty=${specialty}`)
+   470→      .then((r) => setProviders(r.providers))
+   471→      .catch((err: Error) => toast.error(err.message));
+   472→  }, [step, selectedService]);
+   473→
+   474→  const fetchSlots = useCallback(async (pid: string, d: string) => {
+   475→    setSlotsLoading(true);
+   476→    try {
+   477→      const r = await apiFetch<{ slots: string[] }>(
+   478→        `/api/appointments/slots?providerId=${encodeURIComponent(pid)}&date=${encodeURIComponent(d)}`
+   479→      );
+   480→      setSlots(r.slots);
+   481→    } catch (err) {
+   482→      toast.error((err as Error).message);
+   483→      setSlots([]);
+   484→    } finally {
+   485→      setSlotsLoading(false);
+   486→    }
+   487→  }, []);
+   488→
+   489→  useEffect(() => {
+   490→    if (step !== 4 || !providerId || !date) return;
+   491→    setTime(null);
+   492→    setSlots(null);
+   493→    fetchSlots(providerId, date);
+   494→  }, [step, providerId, date, fetchSlots]);
+   495→
+   496→  const stepValid =
+   497→    (step === 1 && !!serviceId) ||
+   498→    (step === 2 && !!petId) ||
+   499→    (step === 3 && !!providerId) ||
+   500→    (step === 4 && !!time) ||
+   501→    step === 5;
+   502→
+   503→  function goNext() {
+   504→    if (!stepValid) return;
+   505→    setStep((s) => Math.min(s + 1, 5));
+   506→  }
+   507→
+   508→  function goBack() {
+   509→    setStep((s) => Math.max(s - 1, 1));
+   510→  }
+   511→
+   512→  async function handleConfirm() {
+   513→    if (!serviceId || !petId || !providerId || !time) return;
+   514→    setSubmitting(true);
+   515→    try {
+   516→      const res = await apiFetch<{ appointment: AppointmentDTO }>("/api/appointments", {
+   517→        method: "POST",
+   518→        body: { petId, serviceId, providerId, date, time, notes: notes.trim() || undefined },
+   519→      });
+   520→      setBooked(res.appointment);
+   521→      toast.success("Appointment booked");
+   522→    } catch (err) {
+   523→      toast.error((err as Error).message);
+   524→    } finally {
+   525→      setSubmitting(false);
+   526→    }
+   527→  }
+   528→
+   529→  // ---------- success panel ----------
+   530→  if (booked) {
+   531→    return (
+   532→      <motion.div
+   533→        initial={{ opacity: 0, scale: 0.97 }}
+   534→        animate={{ opacity: 1, scale: 1 }}
+   535→        transition={{ duration: 0.35 }}
+   536→        className="mx-auto max-w-lg"
+   537→      >
+   538→        <Card className="gap-0 p-8 text-center">
+   539→          <motion.div
+   540→            initial={{ scale: 0 }}
+   541→            animate={{ scale: 1 }}
+   542→            transition={{ delay: 0.15, type: "spring", stiffness: 260, damping: 18 }}
+   543→            className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary/10"
+   544→          >
+   545→            <Check className="size-9 text-primary" />
+   546→          </motion.div>
+   547→          <h2 className="mt-4 text-2xl font-bold tracking-tight">Appointment booked!</h2>
+   548→          <p className="mt-1 text-sm text-muted-foreground">
+   549→            {booked.service.name} for {booked.pet.name} with {booked.provider.name}
+   550→          </p>
+   551→          <p className="mt-1 flex items-center justify-center gap-1.5 text-sm font-medium">
+   552→            <CalendarDays className="size-4 text-primary" />
+   553→            {formatDate(booked.date)} at {formatTime(booked.time)}
+   554→          </p>
+   555→          <div className="mt-2">
+   556→            <StatusBadge status={booked.status} />
+   557→          </div>
+   558→          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-center">
+   559→            <Button onClick={() => setPayOpen(true)} className="min-h-11">
+   560→              <BadgeCheck /> Pay now ({formatBDT(booked.price)})
+   561→            </Button>
+   562→            <Button
+   563→              variant="outline"
+   564→              onClick={() => {
+   565→                toast.info("You can pay anytime from your appointments");
+   566→                setView("cust-appointments");
+   567→              }}
+   568→              className="min-h-11"
+   569→            >
+   570→              Pay later
+   571→            </Button>
+   572→          </div>
+   573→        </Card>
+   574→        <PaymentDialog
+   575→          appointment={booked}
+   576→          open={payOpen}
+   577→          onOpenChange={setPayOpen}
+   578→          onDone={() => setView("cust-appointments")}
+   579→        />
+   580→      </motion.div>
+   581→    );
+   582→  }
+   583→
+   584→  const maxCompleted = (() => {
+   585→    if (serviceId === null) return 1;
+   586→    if (petId === null) return 2;
+   587→    if (providerId === null) return 3;
+   588→    if (time === null) return 4;
+   589→    return 5;
+   590→  })();
+   591→
+   592→  return (
+   593→    <div className="mx-auto max-w-4xl space-y-6">
+   594→      {/* Progress header */}
+   595→      <div>
+   596→        <div className="flex items-center justify-between">
+   597→          <h1 className="text-2xl font-bold tracking-tight">Book an appointment</h1>
+   598→          <Button variant="ghost" size="sm" onClick={() => setView("cust-dashboard")} className="min-h-11">
+   599→            Cancel
+   600→          </Button>
+   601→        </div>
+   602→        <ol className="mt-4 grid grid-cols-5 gap-1 sm:gap-2">
+   603→          {STEPS.map((label, i) => {
+   604→            const n = i + 1;
+   605→            const done = n < step;
+   606→            const active = n === step;
+   607→            return (
+   608→              <li key={label} className="flex flex-col items-center gap-1.5">
+   609→                <button
+   610→                  type="button"
+   611→                  disabled={n > maxCompleted}
+   612→                  onClick={() => n <= maxCompleted && setStep(n)}
+   613→                  className={cn(
+   614→                    "flex h-8 w-8 items-center justify-center rounded-full border text-sm font-semibold transition-colors",
+   615→                    done && "border-primary bg-primary text-primary-foreground",
+   616→                    active && "border-primary bg-primary/10 text-primary",
+   617→                    !done && !active && "border-border bg-muted text-muted-foreground",
+   618→                    n <= maxCompleted && !active && "cursor-pointer hover:border-primary/50"
+   619→                  )}
+   620→                  aria-current={active ? "step" : undefined}
+   621→                >
+   622→                  {done ? <Check className="size-4" /> : n}
+   623→                </button>
+   624→                <span
+   625→                  className={cn(
+   626→                    "text-center text-[10px] font-medium sm:text-xs",
+   627→                    active ? "text-foreground" : "text-muted-foreground"
+   628→                  )}
+   629→                >
+   630→                  {label}
+   631→                </span>
+   632→              </li>
+   633→            );
+   634→          })}
+   635→        </ol>
+   636→      </div>
+   637→
+   638→      {/* Step body */}
+   639→      <AnimatePresence mode="wait">
+   640→        <motion.div
+   641→          key={step}
+   642→          initial={{ opacity: 0, x: 24 }}
+   643→          animate={{ opacity: 1, x: 0 }}
+   644→          exit={{ opacity: 0, x: -24 }}
+   645→          transition={{ duration: 0.25, ease: "easeOut" }}
+   646→        >
+   647→          {step === 1 ? (
+   648→            <section aria-label="Choose a service" className="space-y-4">
+   649→              {services === null ? (
+   650→                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   651→                  {Array.from({ length: 6 }).map((_, i) => (
+   652→                    <Skeleton key={i} className="h-36 rounded-2xl" />
+   653→                  ))}
+   654→                </div>
+   655→              ) : services.length === 0 ? (
+   656→                <EmptyState icon={<Star />} title="No services available" description="Please check back later." />
+   657→              ) : (
+   658→                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   659→                  {services.map((svc) => (
+   660→                    <button
+   661→                      key={svc.id}
+   662→                      type="button"
+   663→                      onClick={() => setServiceId(svc.id)}
+   664→                      className={cn(
+   665→                        "rounded-2xl border p-4 text-left shadow-sm transition-all focus-visible:outline-2 focus-visible:outline-primary",
+   666→                        serviceId === svc.id
+   667→                          ? "border-primary bg-primary/5 ring-2 ring-primary/30"
+   668→                          : "bg-card hover:border-primary/40 hover:shadow-md"
+   669→                      )}
+   670→                      aria-pressed={serviceId === svc.id}
+   671→                    >
+   672→                      <div className="flex items-start gap-3">
+   673→                        <div
+   674→                          className={cn(
+   675→                            "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-2xl shadow-sm",
+   676→                            CATEGORY_TILE[svc.category] ?? CATEGORY_TILE.MEDICAL
+   677→                          )}
+   678→                        >
+   679→                          {svc.icon}
+   680→                        </div>
+   681→                        <div className="min-w-0 flex-1">
+   682→                          <p className="truncate font-semibold">{svc.name}</p>
+   683→                          <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+   684→                            <CalendarClock className="size-3" /> {svc.duration} min
+   685→                          </p>
+   686→                          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{svc.description}</p>
+   687→                        </div>
+   688→                      </div>
+   689→                      <div className="mt-3 flex items-center justify-between border-t pt-3">
+   690→                        <span className="text-base font-bold text-primary">{formatBDT(svc.price)}</span>
+   691→                        <Stars value={svc.rating ?? null} count={svc.reviewCount} />
+   692→                      </div>
+   693→                    </button>
+   694→                  ))}
+   695→                </div>
+   696→              )}
+   697→            </section>
+   698→          ) : null}
+   699→
+   700→          {step === 2 ? (
+   701→            <section aria-label="Choose a pet" className="space-y-4">
+   702→              <div className="flex items-center justify-between">
+   703→                <p className="text-sm text-muted-foreground">Who is this appointment for?</p>
+   704→                <Button variant="outline" onClick={() => setAddPetOpen(true)} className="min-h-11">
+   705→                  <Plus /> Add new pet
+   706→                </Button>
+   707→              </div>
+   708→              {pets === null ? (
+   709→                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   710→                  {Array.from({ length: 3 }).map((_, i) => (
+   711→                    <Skeleton key={i} className="h-28 rounded-2xl" />
+   712→                  ))}
+   713→                </div>
+   714→              ) : pets.length === 0 ? (
+   715→                <EmptyState
+   716→                  icon={<Plus />}
+   717→                  title="No pets yet"
+   718→                  description="Add a pet to continue with your booking."
+   719→                  action={
+   720→                    <Button onClick={() => setAddPetOpen(true)} className="min-h-11">
+   721→                      <Plus /> Add new pet
+   722→                    </Button>
+   723→                  }
+   724→                />
+   725→              ) : (
+   726→                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   727→                  {pets.map((pet) => (
+   728→                    <button
+   729→                      key={pet.id}
+   730→                      type="button"
+   731→                      onClick={() => setPetId(pet.id)}
+   732→                      className={cn(
+   733→                        "flex items-center gap-3 rounded-2xl border p-4 text-left shadow-sm transition-all focus-visible:outline-2 focus-visible:outline-primary",
+   734→                        petId === pet.id
+   735→                          ? "border-primary bg-primary/5 ring-2 ring-primary/30"
+   736→                          : "bg-card hover:border-primary/40 hover:shadow-md"
+   737→                      )}
+   738→                      aria-pressed={petId === pet.id}
+   739→                    >
+   740→                      {pet.photo ? (
+   741→                         
+   742→                        <img
+   743→                          src={pet.photo}
+   744→                          alt={pet.name}
+   745→                          className="h-12 w-12 shrink-0 rounded-xl object-cover"
+   746→                        />
+   747→                      ) : (
+   748→                        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-600 to-teal-500 text-2xl">
+   749→                          {petEmoji(pet.type)}
+   750→                        </div>
+   751→                      )}
+   752→                      <div className="min-w-0 flex-1">
+   753→                        <p className="truncate font-semibold">{pet.name}</p>
+   754→                        <p className="truncate text-xs text-muted-foreground">
+   755→                          {pet.breed ?? String(pet.type).replace(/_/g, " ")}
+   756→                        </p>
+   757→                      </div>
+   758→                      {petId === pet.id ? (
+   759→                        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground">
+   760→                          <Check className="size-4" />
+   761→                        </span>
+   762→                      ) : null}
+   763→                    </button>
+   764→                  ))}
+   765→                </div>
+   766→              )}
+   767→            </section>
+   768→          ) : null}
+   769→
+   770→          {step === 3 ? (
+   771→            <section aria-label="Choose a provider" className="space-y-4">
+   772→              <p className="text-sm text-muted-foreground">
+   773→                {selectedService?.category === "GROOMING"
+   774→                  ? "Pick a groomer for the session"
+   775→                  : "Pick a veterinarian for the visit"}
+   776→              </p>
+   777→              {providers === null ? (
+   778→                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   779→                  {Array.from({ length: 3 }).map((_, i) => (
+   780→                    <Skeleton key={i} className="h-28 rounded-2xl" />
+   781→                  ))}
+   782→                </div>
+   783→              ) : providers.length === 0 ? (
+   784→                <EmptyState
+   785→                  icon={<Star />}
+   786→                  title="No providers available"
+   787→                  description={
+   788→                    selectedService?.category === "GROOMING"
+   789→                      ? "There are no active groomers right now."
+   790→                      : "There are no active veterinarians right now."
+   791→                  }
+   792→                />
+   793→              ) : (
+   794→                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   795→                  {providers.map((prov) => (
+   796→                    <button
+   797→                      key={prov.id}
+   798→                      type="button"
+   799→                      onClick={() => setProviderId(prov.id)}
+   800→                      className={cn(
+   801→                        "flex items-center gap-3 rounded-2xl border p-4 text-left shadow-sm transition-all focus-visible:outline-2 focus-visible:outline-primary",
+   802→                        providerId === prov.id
+   803→                          ? "border-primary bg-primary/5 ring-2 ring-primary/30"
+   804→                          : "bg-card hover:border-primary/40 hover:shadow-md"
+   805→                      )}
+   806→                      aria-pressed={providerId === prov.id}
+   807→                    >
+   808→                      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-600 to-teal-500 text-sm font-bold text-white">
+   809→                        {initials(prov.name)}
+   810→                      </div>
+   811→                      <div className="min-w-0 flex-1">
+   812→                        <p className="truncate font-semibold">{prov.name}</p>
+   813→                        <p className="text-xs text-muted-foreground">
+   814→                          {prov.specialty === "GROOMER" ? "Groomer" : "Veterinarian"}
+   815→                        </p>
+   816→                        <div className="mt-1">
+   817→                          <Stars value={prov.rating ?? null} count={prov.reviewCount} />
+   818→                        </div>
+   819→                      </div>
+   820→                      {providerId === prov.id ? (
+   821→                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+   822→                          <Check className="size-4" />
+   823→                        </span>
+   824→                      ) : null}
+   825→                    </button>
+   826→                  ))}
+   827→                </div>
+   828→              )}
+   829→            </section>
+   830→          ) : null}
+   831→
+   832→          {step === 4 ? (
+   833→            <section aria-label="Choose date and time" className="space-y-4">
+   834→              <div className="grid gap-2 sm:max-w-xs">
+   835→                <Label htmlFor="book-date">Date</Label>
+   836→                <Input
+   837→                  id="book-date"
+   838→                  type="date"
+   839→                  min={todayStr()}
+   840→                  value={date}
+   841→                  onChange={(e) => {
+   842→                    setDate(e.target.value || todayStr());
+   843→                    setTime(null);
+   844→                  }}
+   845→                />
+   846→              </div>
+   847→              <div>
+   848→                <p className="mb-2 text-sm font-medium">Available slots</p>
+   849→                {slotsLoading ? (
+   850→                  <div className="flex flex-wrap gap-2">
+   851→                    {Array.from({ length: 8 }).map((_, i) => (
+   852→                      <Skeleton key={i} className="h-11 w-24 rounded-full" />
+   853→                    ))}
+   854→                  </div>
+   855→                ) : slots === null ? (
+   856→                  <p className="text-sm text-muted-foreground">Loading slots...</p>
+   857→                ) : slots.length === 0 ? (
+   858→                  <EmptyState
+   859→                    icon={<CalendarClock />}
+   860→                    title="No slots this day"
+   861→                    description="All slots are booked or past. Try another date."
+   862→                  />
+   863→                ) : (
+   864→                  <div className="flex flex-wrap gap-2">
+   865→                    {slots.map((slot) => (
+   866→                      <button
+   867→                        key={slot}
+   868→                        type="button"
+   869→                        onClick={() => setTime(slot)}
+   870→                        className={cn(
+   871→                          "min-h-11 rounded-full border px-4 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-primary",
+   872→                          time === slot
+   873→                            ? "border-primary bg-primary text-primary-foreground"
+   874→                            : "bg-card hover:border-primary/50 hover:bg-primary/5"
+   875→                        )}
+   876→                        aria-pressed={time === slot}
+   877→                      >
+   878→                        {formatTime(slot)}
+   879→                      </button>
+   880→                    ))}
+   881→                  </div>
+   882→                )}
+   883→              </div>
+   884→            </section>
+   885→          ) : null}
+   886→
+   887→          {step === 5 ? (
+   888→            <section aria-label="Confirm booking" className="space-y-4">
+   889→              <Card className="gap-0 p-6">
+   890→                <div className="flex items-center gap-4">
+   891→                  <div
+   892→                    className={cn(
+   893→                      "flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-3xl shadow-sm",
+   894→                      CATEGORY_TILE[selectedService?.category ?? "MEDICAL"] ?? CATEGORY_TILE.MEDICAL
+   895→                    )}
+   896→                  >
+   897→                    {selectedService?.icon}
+   898→                  </div>
+   899→                  <div className="min-w-0">
+   900→                    <p className="text-lg font-semibold">{selectedService?.name}</p>
+   901→                    <p className="text-sm text-muted-foreground">
+   902→                      {selectedService?.duration} min · {selectedService?.category}
+   903→                    </p>
+   904→                  </div>
+   905→                  <span className="ml-auto text-xl font-bold text-primary">
+   906→                    {formatBDT(selectedService?.price ?? 0)}
+   907→                  </span>
+   908→                </div>
+   909→                <Separator className="my-4" />
+   910→                <dl className="grid gap-3 text-sm sm:grid-cols-2">
+   911→                  <div className="flex items-center gap-2">
+   912→                    <span className="text-muted-foreground">Pet:</span>
+   913→                    <span className="font-medium">
+   914→                      {selectedPet ? `${petEmoji(selectedPet.type)} ${selectedPet.name}` : "—"}
+   915→                    </span>
+   916→                  </div>
+   917→                  <div className="flex items-center gap-2">
+   918→                    <span className="text-muted-foreground">Provider:</span>
+   919→                    <span className="font-medium">{selectedProvider?.name ?? "—"}</span>
+   920→                  </div>
+   921→                  <div className="flex items-center gap-2">
+   922→                    <span className="text-muted-foreground">Date:</span>
+   923→                    <span className="font-medium">{formatDate(date)}</span>
+   924→                  </div>
+   925→                  <div className="flex items-center gap-2">
+   926→                    <span className="text-muted-foreground">Time:</span>
+   927→                    <span className="font-medium">{time ? formatTime(time) : "—"}</span>
+   928→                  </div>
+   929→                </dl>
+   930→                <div className="mt-4 grid gap-2">
+   931→                  <Label htmlFor="book-notes">Notes for the provider (optional)</Label>
+   932→                  <Textarea
+   933→                    id="book-notes"
+   934→                    value={notes}
+   935→                    onChange={(e) => setNotes(e.target.value)}
+   936→                    placeholder="Anything the vet or groomer should know..."
+   937→                    rows={3}
+   938→                  />
+   939→                </div>
+   940→              </Card>
+   941→            </section>
+   942→          ) : null}
+   943→        </motion.div>
+   944→      </AnimatePresence>
+   945→
+   946→      {/* Nav buttons */}
+   947→      <div className="flex items-center justify-between gap-3">
+   948→        <Button
+   949→          variant="outline"
+   950→          onClick={goBack}
+   951→          disabled={step === 1 || submitting}
+   952→          className="min-h-11"
+   953→        >
+   954→          <ArrowLeft /> Back
+   955→        </Button>
+   956→        <div className="flex flex-col items-end gap-1">
+   957→          <StepHint show={!stepValid && step !== 5}>
+   958→            {step === 1
+   959→              ? "Select a service to continue"
+   960→              : step === 2
+   961→                ? "Select a pet to continue"
+   962→                : step === 3
+   963→                  ? "Select a provider to continue"
+   964→                  : "Pick a time slot to continue"}
+   965→          </StepHint>
+   966→          {step < 5 ? (
+   967→            <Button onClick={goNext} disabled={!stepValid} className="min-h-11">
+   968→              Next <ArrowRight />
+   969→            </Button>
+   970→          ) : (
+   971→            <Button onClick={handleConfirm} disabled={submitting || !serviceId || !petId || !providerId || !time} className="min-h-11">
+   972→              {submitting ? <Loader2 className="animate-spin" /> : <BadgeCheck />}
+   973→              Confirm booking
+   974→            </Button>
+   975→          )}
+   976→        </div>
+   977→      </div>
+   978→
+   979→      <InlineAddPetDialog
+   980→        open={addPetOpen}
+   981→        onOpenChange={setAddPetOpen}
+   982→        onCreated={(pet) => {
+   983→          setPets((prev) => (prev ? [...prev, pet] : [pet]));
+   984→          setPetId(pet.id);
+   985→        }}
+   986→      />
+   987→    </div>
+   988→  );
+   989→}
+   990→
