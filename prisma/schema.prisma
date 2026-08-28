@@ -1,0 +1,164 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Roles: ADMIN | STAFF | VET | GROOMER | CUSTOMER
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      String   @default("CUSTOMER")
+  phone     String?
+  specialty String?  // VET | GROOMER (for providers)
+  bio       String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  pets                 Pet[]
+  customerAppointments Appointment[]     @relation("CustomerAppointments")
+  providerAppointments Appointment[]     @relation("ProviderAppointments")
+  treatments           Treatment[]
+  payments             Payment[]
+  reviewsGiven         Review[] @relation("ReviewCustomer")
+  reviewsReceived      Review[] @relation("ReviewProvider")
+  notifications        Notification[]
+}
+
+model Pet {
+  id                String  @id @default(cuid())
+  name              String
+  type              String  // DOG | CAT | BIRD | OTHER
+  breed             String?
+  gender            String? // MALE | FEMALE
+  birthDate         String?
+  weight            Float?
+  color             String?
+  photo             String?
+  medicalNotes      String?
+  vaccinationStatus String? // UP_TO_DATE | PARTIAL | NONE
+  ownerId           String
+  owner             User    @relation(fields: [ownerId], references: [id])
+  createdAt         DateTime @default(now())
+
+  appointments Appointment[]
+  treatments   Treatment[]
+  reviews      Review[]
+}
+
+model Service {
+  id          String  @id @default(cuid())
+  name        String
+  category    String  // MEDICAL | GROOMING | DIAGNOSTIC
+  description String
+  duration    Int     // minutes
+  price       Float
+  icon        String  @default("🐾")
+  active      Boolean @default(true)
+  createdAt   DateTime @default(now())
+
+  appointments Appointment[]
+  reviews      Review[]
+}
+
+model Appointment {
+  id            String @id @default(cuid())
+  customerId    String
+  customer      User   @relation("CustomerAppointments", fields: [customerId], references: [id])
+  petId         String
+  pet           Pet    @relation(fields: [petId], references: [id])
+  serviceId     String
+  service       Service @relation(fields: [serviceId], references: [id])
+  providerId    String
+  provider      User   @relation("ProviderAppointments", fields: [providerId], references: [id])
+  date          String // yyyy-MM-dd
+  time          String // HH:mm
+  status        String @default("PENDING") // PENDING | CONFIRMED | CHECKED_IN | IN_PROGRESS | COMPLETED | CANCELLED
+  paymentStatus String @default("UNPAID") // UNPAID | PAID | REFUNDED
+  price         Float
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  treatment Treatment?
+  payments  Payment[]
+  review    Review?
+}
+
+model Treatment {
+  id            String @id @default(cuid())
+  appointmentId String @unique
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
+  petId         String
+  pet           Pet    @relation(fields: [petId], references: [id])
+  providerId    String
+  provider      User   @relation(fields: [providerId], references: [id])
+  symptoms      String?
+  diagnosis     String?
+  treatmentPlan String?
+  prescription  String?
+  medication    String?
+  dosage        String?
+  followUpDate  String?
+  notes         String?
+  createdAt     DateTime @default(now())
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  invoiceId     String   @unique
+  appointmentId String
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
+  customerId    String
+  customer      User     @relation(fields: [customerId], references: [id])
+  amount        Float
+  method        String   // CASH | CARD | MOBILE
+  transactionId String
+  status        String   @default("PAID") // PAID | PENDING | REFUNDED
+  paidAt        DateTime @default(now())
+}
+
+model Review {
+  id            String @id @default(cuid())
+  appointmentId String @unique
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
+  customerId    String
+  customer      User   @relation("ReviewCustomer", fields: [customerId], references: [id])
+  petId         String?
+  pet           Pet?   @relation(fields: [petId], references: [id])
+  serviceId     String
+  service       Service @relation(fields: [serviceId], references: [id])
+  providerId    String
+  provider      User   @relation("ReviewProvider", fields: [providerId], references: [id])
+  rating        Int
+  comment       String?
+  status        String @default("PENDING") // PENDING | APPROVED | HIDDEN
+  createdAt     DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  title     String
+  message   String
+  type      String   @default("SYSTEM") // BOOKING | STATUS | PAYMENT | TREATMENT | SYSTEM
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model Setting {
+  id          String @id @default("main")
+  clinicName  String @default("PawCare Pet Clinic")
+  address     String @default("House 12, Road 5, Banani, Dhaka 1213")
+  phone       String @default("+880 1700-000000")
+  email       String @default("hello@pawcare.com")
+  openTime    String @default("09:00")
+  closeTime   String @default("17:00")
+  slotMinutes Int    @default(60)
+}
