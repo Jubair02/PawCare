@@ -296,3 +296,17 @@ Stage Summary:
 - Vet module now complete: vet-dashboard, vet-appointments, vet-patients, vet-treatments, vet-schedule (vet-profile = shared ProfileView). Staff module complete: staff-dashboard, staff-appointments, staff-customers, staff-pets, staff-payments (staff-profile = shared ProfileView).
 - Notes for orchestrator: view switch should map vet-patients→VetPatientsView, vet-treatments→VetTreatmentsView, vet-schedule→VetScheduleView, staff-dashboard→StaffDashboard, staff-appointments→StaffAppointmentsView, staff-customers→StaffCustomersView, staff-pets→StaffPetsView, staff-payments→StaffPaymentsView. POST /api/appointments ignores customerId (derives owner from pet) — sent anyway per spec, harmless. No existing files modified.
 ---
+---
+Task ID: 7+8
+Agent: Z.ai (orchestrator)
+Task: Integration + browser verification
+
+Work Log:
+- Wired src/app/page.tsx SPA view registry (35 views: landing, auth, 10 customer, 6 vet, 6 staff, 9 admin) inside AppShell; fixed shared component imports.
+- Fixed defects found during verification: missing PawPrint import (pets-view), unused eslint-disable directives, duplicate hint props after title shortening, truncated KPI labels (shortened titles + responsive grid + wrap instead of truncate).
+- Re-seeded twice: fixed seed PRNG short-cycle bug (mulberry32); extended upcoming horizon to +14/+30/+45 days so dashboards always show upcoming bookings; final seed = 62 appointments, 49 payments.
+- Browser-verified via agent-browser (desktop 1280 + mobile 375): landing render, demo-chip login x4 roles, customer booking wizard 5 steps -> mobile-banking payment -> auto-confirm, vet accept -> check-in -> start -> treatment record (auto-complete), staff dashboard + today schedule, admin dashboard 4 charts + review moderation (approve) + KPI polish, register (201/409), forgot password, notifications badge increments, sticky footer, no console/page errors.
+
+Stage Summary:
+- All MVP phases (1-12) from the user's spec are implemented and browser-verified on the golden paths.
+- Known demo-grade simplifications: auth token = user id (no JWT expiry), mock payment processing, in-app notifications only (per spec MVP).

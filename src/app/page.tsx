@@ -5,7 +5,9 @@ import type { ComponentType } from "react";
 import { AppShell } from "@/components/shell/app-shell";
 import { LandingView } from "@/components/landing/landing-view";
 import { AuthView } from "@/components/auth/auth-view";
-import { NotificationsView, ProfileView } from "@/components/shared";
+import { useAppStore } from "@/lib/store";
+import { NotificationsView } from "@/components/shared/notifications-view";
+import { ProfileView } from "@/components/shared/profile-view";
 
 import { CustomerDashboard } from "@/components/customer/customer-dashboard";
 import { PetsView } from "@/components/customer/pets-view";
@@ -89,7 +91,7 @@ const VIEWS: Record<string, ComponentType> = {
 };
 
 export default function Page() {
-  const view = useAppStoreSafe();
+  const view = useAppStore((s) => s.view) || "landing";
 
   const ViewComponent = VIEWS[view] ?? LandingView;
 
@@ -98,15 +100,4 @@ export default function Page() {
       <ViewComponent />
     </AppShell>
   );
-}
-
-/**
- * Reading the store at render time — kept in a tiny hook so the page
- * component stays simple. Falls back to "landing" before hydration;
- * AppShell renders the branded splash until the persisted store is ready.
- */
-import { useAppStore } from "@/lib/store";
-
-function useAppStoreSafe(): string {
-  return useAppStore((s) => s.view) || "landing";
 }

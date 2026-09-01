@@ -97,10 +97,10 @@ export function StaffDashboard() {
         ) : (
           <>
             <StatCard
-              title="Today's Appointments"
+              title="Today"
               value={data?.todayAppointments ?? 0}
               icon={<CalendarDays />}
-              hint="On today's schedule"
+              hint="Appointments today"
             />
             <StatCard
               title="Pending Confirmations"

@@ -129,7 +129,7 @@ export function AdminDashboard() {
     return (
       <div className="space-y-6">
         <Skeleton className="h-8 w-56" />
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-6">
           {Array.from({ length: 6 }).map((_, i) => (
             <Skeleton key={i} className="h-24 rounded-2xl" />
           ))}
@@ -173,13 +173,13 @@ export function AdminDashboard() {
       </SectionHeader>
 
       {/* KPI stat cards */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-        <StatCard title="Total Customers" value={data.totalCustomers} icon={<Users />} tone="default" />
-        <StatCard title="Total Pets" value={data.totalPets} icon={<PawPrint />} tone="teal" />
-        <StatCard title="Today's Appointments" value={data.todayAppointments} icon={<CalendarDays />} tone="violet" />
-        <StatCard title="Total Revenue" value={formatBDT(data.totalRevenue)} icon={<Wallet />} tone="default" />
-        <StatCard title="Pending Appointments" value={data.pendingAppointments} icon={<Clock />} tone="amber" />
-        <StatCard title="Active Vets & Groomers" value={data.activeProviders} icon={<Stethoscope />} tone="teal" />
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-6">
+        <StatCard title="Customers" hint="Registered accounts" value={data.totalCustomers} icon={<Users />} tone="default" />
+        <StatCard title="Pets" hint="Across all owners" value={data.totalPets} icon={<PawPrint />} tone="teal" />
+        <StatCard title="Today" hint="Appointments today" value={data.todayAppointments} icon={<CalendarDays />} tone="violet" />
+        <StatCard title="Revenue" hint="All-time collected" value={formatBDT(data.totalRevenue)} icon={<Wallet />} tone="default" />
+        <StatCard title="Pending" hint="Awaiting confirmation" value={data.pendingAppointments} icon={<Clock />} tone="amber" />
+        <StatCard title="Providers" hint="Vets & groomers active" value={data.activeProviders} icon={<Stethoscope />} tone="teal" />
       </div>
 
       {/* Charts */}

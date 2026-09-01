@@ -198,7 +198,7 @@ async function main() {
     }
   }
 
-  // ---- Upcoming: next 7 days ----
+  // ---- Upcoming: next 14 days + a couple of far-future bookings ----
   const upcomingSpecs: Array<Parameters<typeof createAppointment>[0]> = [
     { date: fmt(addDays(now, 1)), time: "10:00", petIdx: 0, service: sConsult, providerId: vet1.id, status: "CONFIRMED", paymentStatus: "PAID", notes: "Annual wellness check." },
     { date: fmt(addDays(now, 1)), time: "15:00", petIdx: 2, service: sGroom, providerId: groomer.id, status: "CONFIRMED", paymentStatus: "PAID", notes: "Kiwi's feathers trimmed lightly." },
@@ -207,6 +207,14 @@ async function main() {
     { date: fmt(now), time: "14:00", petIdx: 4, service: sDental, providerId: vet2.id, status: "CHECKED_IN", paymentStatus: "PAID" },
     { date: fmt(now), time: "15:00", petIdx: 5, service: sGroom, providerId: groomer.id, status: "IN_PROGRESS", paymentStatus: "UNPAID", notes: "Teddy bear cut please." },
     { date: fmt(addDays(now, 5)), time: "09:00", petIdx: 0, service: sNail, providerId: groomer.id, status: "PENDING", paymentStatus: "UNPAID" },
+    { date: fmt(addDays(now, 2)), time: "09:00", petIdx: 0, service: sConsult, providerId: vet1.id, status: "PENDING", paymentStatus: "UNPAID", notes: "Skin rash on belly — needs review." },
+    { date: fmt(addDays(now, 4)), time: "16:00", petIdx: 1, service: sGroom, providerId: groomer.id, status: "CONFIRMED", paymentStatus: "PAID" },
+    { date: fmt(addDays(now, 6)), time: "10:00", petIdx: 3, service: sVaccine, providerId: vet1.id, status: "CONFIRMED", paymentStatus: "PAID", notes: "Annual rabies booster." },
+    { date: fmt(addDays(now, 8)), time: "11:00", petIdx: 5, service: sConsult, providerId: vet1.id, status: "PENDING", paymentStatus: "UNPAID" },
+    { date: fmt(addDays(now, 10)), time: "14:00", petIdx: 4, service: sLab, providerId: vet2.id, status: "CONFIRMED", paymentStatus: "PAID" },
+    { date: fmt(addDays(now, 13)), time: "15:00", petIdx: 2, service: sNail, providerId: groomer.id, status: "PENDING", paymentStatus: "UNPAID" },
+    { date: fmt(addDays(now, 30)), time: "10:00", petIdx: 0, service: sVaccine, providerId: vet1.id, status: "CONFIRMED", paymentStatus: "UNPAID", notes: "6-month booster plan." },
+    { date: fmt(addDays(now, 45)), time: "12:00", petIdx: 3, service: sConsult, providerId: vet2.id, status: "PENDING", paymentStatus: "UNPAID", notes: "Hip check follow-up." },
   ];
   for (const spec of upcomingSpecs) await createAppointment(spec);
 
