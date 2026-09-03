@@ -30,6 +30,8 @@ import { formatBDT, initials } from "@/lib/formatters";
 import { homeViewForRole, useAppStore } from "@/lib/store";
 import type { ProviderDTO, ReviewDTO, ServiceDTO, SettingDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import Image from "next/image";
+import { SiteFooter } from "@/components/shared/site-footer";
 
 // ---------- helpers ----------
 
@@ -72,9 +74,9 @@ function Stars({ value, className }: { value: number; className?: string }) {
 }
 
 const CATEGORY_BADGE: Record<string, string> = {
-  MEDICAL: "bg-teal-100 text-teal-700 border-teal-200",
-  GROOMING: "bg-amber-100 text-amber-700 border-amber-200",
-  DIAGNOSTIC: "bg-violet-100 text-violet-700 border-violet-200",
+  MEDICAL: "bg-teal-100 dark:bg-teal-950/50 text-teal-700 dark:text-teal-200 border-teal-200 dark:border-teal-900",
+  GROOMING: "bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-900",
+  DIAGNOSTIC: "bg-violet-100 dark:bg-violet-950/50 text-violet-700 dark:text-violet-200 border-violet-200 dark:border-violet-900",
 };
 
 const CATEGORY_TILE: Record<string, string> = {
@@ -170,7 +172,7 @@ function ProviderCard({ provider }: { provider: ProviderDTO }) {
         <h3 className="font-semibold leading-tight">{provider.name}</h3>
         <Badge
           variant="outline"
-          className={cn("mt-1.5", isVet ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-amber-100 text-amber-700 border-amber-200")}
+          className={cn("mt-1.5", isVet ? "bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-200 border-emerald-200 dark:border-emerald-900" : "bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-200 border-amber-200 dark:border-amber-900")}
         >
           {isVet ? "Veterinarian" : "Groomer"}
         </Badge>
@@ -255,7 +257,6 @@ export function LandingView() {
     else goAuth("register");
   };
 
-  const year = new Date().getFullYear();
 
   return (
     <div className="min-h-screen bg-background">
@@ -343,7 +344,7 @@ export function LandingView() {
         <section className="mx-auto w-full max-w-7xl px-4 pb-16 pt-10 md:px-6 md:pt-16">
           <div className="grid items-center gap-10 lg:grid-cols-2">
             <FadeIn>
-              <Badge variant="outline" className="border-amber-200 bg-amber-100 text-amber-800">
+              <Badge variant="outline" className="border-amber-200 dark:border-amber-900 bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-200">
                 <Sparkles className="size-3" /> Trusted by 500+ pet parents
               </Badge>
               <h1 className="mt-4 text-4xl font-extrabold leading-tight tracking-tight sm:text-5xl">
@@ -375,9 +376,13 @@ export function LandingView() {
 
             <FadeIn delay={0.15} className="relative">
               <div className="relative">
-                <img
+                <Image
                   src="/images/hero.png"
                   alt="A happy dog being cared for by a PawCare veterinarian"
+                  width={1344}
+                  height={768}
+                  priority
+                  sizes="(max-width: 1024px) 100vw, 50vw"
                   className="w-full rounded-3xl border shadow-xl object-cover"
                 />
                 {/* floating card: next available */}
@@ -442,7 +447,7 @@ export function LandingView() {
         <section id="services" className="mx-auto w-full max-w-7xl scroll-mt-20 px-4 py-16 md:px-6">
           <FadeIn>
             <div className="mb-8 text-center">
-              <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
+              <Badge variant="outline" className="border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-200">
                 Our services
               </Badge>
               <h2 className="mt-3 text-3xl font-bold tracking-tight">Everything your pet needs</h2>
@@ -512,7 +517,7 @@ export function LandingView() {
         <section id="team" className="mx-auto w-full max-w-7xl scroll-mt-20 px-4 py-16 md:px-6">
           <FadeIn>
             <div className="mb-8 text-center">
-              <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
+              <Badge variant="outline" className="border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-200">
                 Our team
               </Badge>
               <h2 className="mt-3 text-3xl font-bold tracking-tight">Meet the caregivers</h2>
@@ -598,16 +603,19 @@ export function LandingView() {
                   <Button
                     size="lg"
                     onClick={bookNow}
-                    className="mt-6 min-h-11 bg-white text-emerald-700 hover:bg-emerald-50"
+                    className="mt-6 min-h-11 bg-white text-emerald-700 dark:text-emerald-200 hover:bg-emerald-50 dark:bg-emerald-950/40"
                   >
                     <CalendarPlus className="size-4" />
                     Book an appointment
                   </Button>
                 </div>
                 <div className="overflow-hidden rounded-2xl shadow-lg">
-                  <img
+                  <Image
                     src="/images/spa.png"
                     alt="A relaxed pet enjoying a spa grooming session"
+                    width={1024}
+                    height={1024}
+                    sizes="(max-width: 768px) 100vw, 50vw"
                     className="h-56 w-full object-cover md:h-64"
                   />
                 </div>
@@ -679,12 +687,7 @@ export function LandingView() {
             </ul>
           </div>
         </div>
-        <div className="border-t border-emerald-800/60">
-          <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-4 text-xs text-emerald-200/70 md:px-6">
-            <p>© {year} PawCare Pet Clinic. All rights reserved.</p>
-            <p>Made with ❤ for pets</p>
-          </div>
-        </div>
+        <SiteFooter as="div" tone="dark" note={<p>Made with ❤ for pets</p>} />
       </footer>
     </div>
   );

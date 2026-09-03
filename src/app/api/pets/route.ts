@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { ApiError, handleError, json, requireUser } from "@/lib/auth";
 import type { Prisma } from "@prisma/client";
-import { PET_GENDERS, PET_TYPES, VACCINATION_STATUSES, asNumber, asString, readBody, shapePet } from "@/app/api/_lib/shape";
+import { PET_GENDERS, PET_TYPES, VACCINATION_STATUSES, asNumber, asString, assertValidPhoto, pageMeta, readBody, readPage, shapePet } from "@/app/api/_lib/shape";
 
 /**
  * GET /api/pets — role-scoped.
@@ -24,15 +24,24 @@ export async function GET(req: Request) {
 
     const q = url.searchParams.get("q");
     if (q) {
-      where.OR = [{ name: { contains: q } }, { breed: { contains: q } }, { type: { contains: q } }];
+      where.OR = [
+        { name: { contains: q, mode: "insensitive" } },
+        { breed: { contains: q, mode: "insensitive" } },
+        { type: { contains: q, mode: "insensitive" } },
+      ];
     }
 
-    const pets = await db.pet.findMany({
-      where,
-      include: { owner: true, _count: { select: { appointments: true } } },
-      orderBy: { createdAt: "desc" },
-    });
-    return json({ pets: pets.map(shapePet) });
+    const page = readPage(url);
+    const [pets, total] = await Promise.all([
+      db.pet.findMany({
+        where,
+        include: { owner: true, _count: { select: { appointments: true } } },
+        orderBy: { createdAt: "desc" },
+        ...page,
+      }),
+      db.pet.count({ where }),
+    ]);
+    return json({ pets: pets.map(shapePet), page: pageMeta(total, page) });
   } catch (e) {
     return handleError(e);
   }
@@ -64,6 +73,7 @@ export async function POST(req: Request) {
       throw new ApiError("Vaccination status must be UP_TO_DATE, PARTIAL or NONE.", 400);
     }
     if (weight !== undefined && weight <= 0) throw new ApiError("Weight must be a positive number.", 400);
+    if (photo !== undefined) assertValidPhoto(photo);
 
     const created = await db.pet.create({
       data: {

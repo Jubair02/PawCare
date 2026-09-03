@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // Roles: ADMIN | STAFF | VET | GROOMER | CUSTOMER
@@ -15,26 +16,29 @@ model User {
   password  String
   role      String   @default("CUSTOMER")
   phone     String?
-  specialty String?  // VET | GROOMER (for providers)
+  specialty String? // VET | GROOMER (for providers)
   bio       String?
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   pets                 Pet[]
-  customerAppointments Appointment[]     @relation("CustomerAppointments")
-  providerAppointments Appointment[]     @relation("ProviderAppointments")
+  customerAppointments Appointment[]  @relation("CustomerAppointments")
+  providerAppointments Appointment[]  @relation("ProviderAppointments")
   treatments           Treatment[]
   payments             Payment[]
-  reviewsGiven         Review[] @relation("ReviewCustomer")
-  reviewsReceived      Review[] @relation("ReviewProvider")
+  reviewsGiven         Review[]       @relation("ReviewCustomer")
+  reviewsReceived      Review[]       @relation("ReviewProvider")
   notifications        Notification[]
+
+  @@index([role, active]) // provider lists, admin/staff role filters
+  @@index([createdAt])
 }
 
 model Pet {
-  id                String  @id @default(cuid())
+  id                String   @id @default(cuid())
   name              String
-  type              String  // DOG | CAT | BIRD | OTHER
+  type              String // DOG | CAT | BIRD | OTHER
   breed             String?
   gender            String? // MALE | FEMALE
   birthDate         String?
@@ -44,23 +48,26 @@ model Pet {
   medicalNotes      String?
   vaccinationStatus String? // UP_TO_DATE | PARTIAL | NONE
   ownerId           String
-  owner             User    @relation(fields: [ownerId], references: [id])
+  owner             User     @relation(fields: [ownerId], references: [id])
   createdAt         DateTime @default(now())
 
   appointments Appointment[]
   treatments   Treatment[]
   reviews      Review[]
+
+  @@index([ownerId]) // Postgres does not index foreign keys automatically
+  @@index([createdAt])
 }
 
 model Service {
-  id          String  @id @default(cuid())
+  id          String   @id @default(cuid())
   name        String
-  category    String  // MEDICAL | GROOMING | DIAGNOSTIC
+  category    String // MEDICAL | GROOMING | DIAGNOSTIC
   description String
-  duration    Int     // minutes
+  duration    Int // minutes
   price       Float
-  icon        String  @default("🐾")
-  active      Boolean @default(true)
+  icon        String   @default("🐾")
+  active      Boolean  @default(true)
   createdAt   DateTime @default(now())
 
   appointments Appointment[]
@@ -68,19 +75,19 @@ model Service {
 }
 
 model Appointment {
-  id            String @id @default(cuid())
+  id            String   @id @default(cuid())
   customerId    String
-  customer      User   @relation("CustomerAppointments", fields: [customerId], references: [id])
+  customer      User     @relation("CustomerAppointments", fields: [customerId], references: [id])
   petId         String
-  pet           Pet    @relation(fields: [petId], references: [id])
+  pet           Pet      @relation(fields: [petId], references: [id])
   serviceId     String
-  service       Service @relation(fields: [serviceId], references: [id])
+  service       Service  @relation(fields: [serviceId], references: [id])
   providerId    String
-  provider      User   @relation("ProviderAppointments", fields: [providerId], references: [id])
+  provider      User     @relation("ProviderAppointments", fields: [providerId], references: [id])
   date          String // yyyy-MM-dd
   time          String // HH:mm
-  status        String @default("PENDING") // PENDING | CONFIRMED | CHECKED_IN | IN_PROGRESS | COMPLETED | CANCELLED
-  paymentStatus String @default("UNPAID") // UNPAID | PAID | REFUNDED
+  status        String   @default("PENDING") // PENDING | CONFIRMED | CHECKED_IN | IN_PROGRESS | COMPLETED | CANCELLED
+  paymentStatus String   @default("UNPAID") // UNPAID | CASH_DUE | PAID | REFUNDED
   price         Float
   notes         String?
   createdAt     DateTime @default(now())
@@ -88,16 +95,25 @@ model Appointment {
   treatment Treatment?
   payments  Payment[]
   review    Review?
+
+  // Backs the slot-overlap check run on every booking and reschedule.
+  @@index([providerId, date])
+  @@index([customerId, date]) // customer list + dashboard, ordered by date
+  @@index([petId])
+  @@index([serviceId])
+  @@index([date, status]) // "today's appointments", status counts
+  @@index([status])
+  @@index([createdAt])
 }
 
 model Treatment {
-  id            String @id @default(cuid())
-  appointmentId String @unique
+  id            String      @id @default(cuid())
+  appointmentId String      @unique
   appointment   Appointment @relation(fields: [appointmentId], references: [id])
   petId         String
-  pet           Pet    @relation(fields: [petId], references: [id])
+  pet           Pet         @relation(fields: [petId], references: [id])
   providerId    String
-  provider      User   @relation(fields: [providerId], references: [id])
+  provider      User        @relation(fields: [providerId], references: [id])
   symptoms      String?
   diagnosis     String?
   treatmentPlan String?
@@ -106,39 +122,54 @@ model Treatment {
   dosage        String?
   followUpDate  String?
   notes         String?
-  createdAt     DateTime @default(now())
+  createdAt     DateTime    @default(now())
+
+  @@index([petId])
+  @@index([providerId])
+  @@index([createdAt])
 }
 
 model Payment {
-  id            String   @id @default(cuid())
-  invoiceId     String   @unique
+  id            String      @id @default(cuid())
+  invoiceId     String      @unique
   appointmentId String
   appointment   Appointment @relation(fields: [appointmentId], references: [id])
   customerId    String
-  customer      User     @relation(fields: [customerId], references: [id])
+  customer      User        @relation(fields: [customerId], references: [id])
   amount        Float
-  method        String   // CASH | CARD | MOBILE
+  method        String // CASH | CARD | MOBILE
   transactionId String
-  status        String   @default("PAID") // PAID | PENDING | REFUNDED
-  paidAt        DateTime @default(now())
+  status        String      @default("PAID") // PAID | PENDING | REFUNDED
+  paidAt        DateTime    @default(now())
+
+  @@index([customerId])
+  @@index([appointmentId])
+  @@index([status, paidAt]) // revenue aggregates over a day/month window
+  @@index([paidAt])
 }
 
 model Review {
-  id            String @id @default(cuid())
-  appointmentId String @unique
+  id            String      @id @default(cuid())
+  appointmentId String      @unique
   appointment   Appointment @relation(fields: [appointmentId], references: [id])
   customerId    String
-  customer      User   @relation("ReviewCustomer", fields: [customerId], references: [id])
+  customer      User        @relation("ReviewCustomer", fields: [customerId], references: [id])
   petId         String?
-  pet           Pet?   @relation(fields: [petId], references: [id])
+  pet           Pet?        @relation(fields: [petId], references: [id])
   serviceId     String
-  service       Service @relation(fields: [serviceId], references: [id])
+  service       Service     @relation(fields: [serviceId], references: [id])
   providerId    String
-  provider      User   @relation("ReviewProvider", fields: [providerId], references: [id])
+  provider      User        @relation("ReviewProvider", fields: [providerId], references: [id])
   rating        Int
   comment       String?
-  status        String @default("PENDING") // PENDING | APPROVED | HIDDEN
-  createdAt     DateTime @default(now())
+  status        String      @default("PENDING") // PENDING | APPROVED | HIDDEN
+  createdAt     DateTime    @default(now())
+
+  @@index([serviceId, status]) // per-service approved rating aggregate
+  @@index([providerId, status]) // per-provider approved rating aggregate
+  @@index([customerId])
+  @@index([petId])
+  @@index([status, createdAt])
 }
 
 model Notification {
@@ -150,6 +181,9 @@ model Notification {
   type      String   @default("SYSTEM") // BOOKING | STATUS | PAYMENT | TREATMENT | SYSTEM
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
+
+  @@index([userId, createdAt]) // the shell polls this list every 30s
+  @@index([userId, read]) // unread badge count
 }
 
 model Setting {

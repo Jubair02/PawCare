@@ -22,8 +22,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { apiFetch } from "@/lib/api";
+import { ListNotice } from "@/components/shared/list-notice";
 import { formatBDT, formatDate } from "@/lib/formatters";
-import type { PaymentDTO } from "@/lib/types";
+import type { PageMeta, PaymentDTO } from "@/lib/types";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
@@ -47,11 +48,16 @@ export function CustomerPaymentsView() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<StatusFilter>("ALL");
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   useEffect(() => {
     let alive = true;
-    apiFetch<{ payments: PaymentDTO[] }>("/api/payments")
+    apiFetch<{ payments: PaymentDTO[]; page?: PageMeta }>("/api/payments")
       .then((res) => {
-        if (alive) setPayments(res.payments);
+        if (alive) {
+          setPayments(res.payments);
+          setPage(res.page ?? null);
+        }
       })
       .catch((err: Error) => {
         if (alive) toast.error(err.message);
@@ -98,6 +104,7 @@ export function CustomerPaymentsView() {
           </SelectContent>
         </Select>
       </SectionHeader>
+      <ListNotice page={page} noun="payments" />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard

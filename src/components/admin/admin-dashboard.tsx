@@ -42,12 +42,12 @@ import type { AdminOverviewData, AppointmentDTO } from "@/lib/types";
 
 /** Exact status colors per CONTRACT (no blue/indigo anywhere). */
 const STATUS_COLORS: Record<string, string> = {
-  PENDING: "#f59e0b",
-  CONFIRMED: "#10b981",
-  CHECKED_IN: "#0d9488",
-  IN_PROGRESS: "#8b5cf6",
-  COMPLETED: "#22c55e",
-  CANCELLED: "#f43f5e",
+  PENDING: "var(--status-pending)",
+  CONFIRMED: "var(--status-confirmed)",
+  CHECKED_IN: "var(--status-checked-in)",
+  IN_PROGRESS: "var(--status-in-progress)",
+  COMPLETED: "var(--status-completed)",
+  CANCELLED: "var(--status-cancelled)",
 };
 
 interface TipEntry {
@@ -70,15 +70,15 @@ function ChartTip({
 }) {
   if (!active || !payload || payload.length === 0) return null;
   return (
-    <div className="min-w-32 rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs shadow-lg">
+    <div className="min-w-32 rounded-xl border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
       {label !== undefined && label !== "" ? (
-        <p className="mb-1 font-semibold text-stone-800">{label}</p>
+        <p className="mb-1 font-semibold text-foreground">{label}</p>
       ) : null}
       {payload.map((entry, i) => (
         <div key={i} className="flex items-center gap-2 py-0.5">
-          <span className="size-2 shrink-0 rounded-full" style={{ background: entry.color ?? "#10b981" }} />
-          <span className="text-stone-500">{entry.name}</span>
-          <span className="ml-auto pl-3 font-semibold text-stone-800">
+          <span className="size-2 shrink-0 rounded-full" style={{ background: entry.color ?? "var(--chart-1)" }} />
+          <span className="text-muted-foreground">{entry.name}</span>
+          <span className="ml-auto pl-3 font-semibold text-stone-800 dark:text-stone-200">
             {money ? formatBDT(Number(entry.value) || 0) : String(entry.value)}
           </span>
         </div>
@@ -158,7 +158,7 @@ export function AdminDashboard() {
     );
   }
 
-  const statusData = data.statusDistribution.map((s) => ({ ...s, fill: STATUS_COLORS[s.status] ?? "#78716c" }));
+  const statusData = data.statusDistribution.map((s) => ({ ...s, fill: STATUS_COLORS[s.status] ?? "var(--muted-foreground)" }));
 
   return (
     <div className="space-y-6">
@@ -188,11 +188,11 @@ export function AdminDashboard() {
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={data.appointmentsByMonth} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e7e5e4" />
-                <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "#78716c" }} dy={6} />
-                <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "#78716c" }} />
-                <Tooltip content={<ChartTip />} cursor={{ fill: "rgba(16, 185, 129, 0.08)" }} />
-                <Bar dataKey="count" name="Appointments" fill="#10b981" radius={[6, 6, 0, 0]} maxBarSize={36} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "var(--muted-foreground)" }} dy={6} />
+                <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "var(--muted-foreground)" }} />
+                <Tooltip content={<ChartTip />} cursor={{ fill: "var(--chart-1)", fillOpacity: 0.08 }} />
+                <Bar dataKey="count" name="Appointments" fill="var(--chart-1)" radius={[6, 6, 0, 0]} maxBarSize={36} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -204,28 +204,28 @@ export function AdminDashboard() {
               <AreaChart data={data.revenueByMonth} margin={{ top: 8, right: 8, left: -6, bottom: 0 }}>
                 <defs>
                   <linearGradient id="revGradDash" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10b981" stopOpacity={0.3} />
-                    <stop offset="100%" stopColor="#10b981" stopOpacity={0} />
+                    <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.3} />
+                    <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e7e5e4" />
-                <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "#78716c" }} dy={6} />
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" />
+                <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "var(--muted-foreground)" }} dy={6} />
                 <YAxis
                   tickLine={false}
                   axisLine={false}
-                  tick={{ fontSize: 12, fill: "#78716c" }}
+                  tick={{ fontSize: 12, fill: "var(--muted-foreground)" }}
                   tickFormatter={(v: number) => compactMoney(v)}
                   width={58}
                 />
-                <Tooltip content={<ChartTip money />} cursor={{ stroke: "#10b981", strokeOpacity: 0.25 }} />
+                <Tooltip content={<ChartTip money />} cursor={{ stroke: "var(--chart-1)", strokeOpacity: 0.25 }} />
                 <Area
                   type="monotone"
                   dataKey="amount"
                   name="Revenue"
-                  stroke="#10b981"
+                  stroke="var(--chart-1)"
                   strokeWidth={2.5}
                   fill="url(#revGradDash)"
-                  activeDot={{ r: 4, fill: "#10b981" }}
+                  activeDot={{ r: 4, fill: "var(--chart-1)" }}
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -236,18 +236,18 @@ export function AdminDashboard() {
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={data.popularServices} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e7e5e4" />
-                <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "#78716c" }} />
+                <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="var(--border)" />
+                <XAxis type="number" allowDecimals={false} tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: "var(--muted-foreground)" }} />
                 <YAxis
                   type="category"
                   dataKey="name"
                   width={120}
                   tickLine={false}
                   axisLine={false}
-                  tick={{ fontSize: 11, fill: "#57534e" }}
+                  tick={{ fontSize: 11, fill: "var(--muted-foreground)" }}
                 />
-                <Tooltip content={<ChartTip />} cursor={{ fill: "rgba(245, 158, 11, 0.08)" }} />
-                <Bar dataKey="count" name="Bookings" fill="#f59e0b" radius={[0, 6, 6, 0]} maxBarSize={20} />
+                <Tooltip content={<ChartTip />} cursor={{ fill: "var(--chart-2)", fillOpacity: 0.08 }} />
+                <Bar dataKey="count" name="Bookings" fill="var(--chart-2)" radius={[0, 6, 6, 0]} maxBarSize={20} />
               </BarChart>
             </ResponsiveContainer>
           </div>

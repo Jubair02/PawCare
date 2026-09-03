@@ -47,9 +47,10 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { apiFetch } from "@/lib/api";
-import { STATUS_FLOW, STATUS_TRANSITIONS } from "@/lib/constants";
+import { ListNotice } from "@/components/shared/list-notice";
+import { STATUS_FLOW, allowedTransitions } from "@/lib/constants";
 import { formatBDT, formatDateShort, formatTime, petEmoji } from "@/lib/formatters";
-import type { AppointmentDTO } from "@/lib/types";
+import type { AppointmentDTO, PageMeta } from "@/lib/types";
 
 /* ------------------------------- constants -------------------------------- */
 
@@ -72,6 +73,8 @@ export function AdminAppointmentsView() {
   const [details, setDetails] = useState<AppointmentDTO | null>(null);
   const [mutatingId, setMutatingId] = useState<string | null>(null);
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -79,10 +82,11 @@ export function AdminAppointmentsView() {
       if (statusFilter !== "ALL") params.set("status", statusFilter);
       if (dateFilter) params.set("date", dateFilter);
       const qs = params.toString();
-      const res = await apiFetch<{ appointments: AppointmentDTO[] }>(
+      const res = await apiFetch<{ appointments: AppointmentDTO[]; page?: PageMeta }>(
         `/api/appointments${qs ? `?${qs}` : ""}`
       );
       setAppts(res.appointments);
+      setPage(res.page ?? null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to load appointments");
       setAppts(null);
@@ -139,6 +143,7 @@ export function AdminAppointmentsView() {
           <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /> Refresh
         </Button>
       </SectionHeader>
+      <ListNotice page={page} noun="appointments" />
 
       {/* Summary chips */}
       {appts && appts.length > 0 ? (
@@ -347,7 +352,9 @@ interface RowProps {
 }
 
 function ActionsMenu({ a, mutatingId, onStatus, onDetails }: RowProps) {
-  const transitions = STATUS_TRANSITIONS[a.status as keyof typeof STATUS_TRANSITIONS] ?? [];
+  // Admin-scoped: this also surfaces the PENDING -> CHECKED_IN walk-in shortcut,
+  // which the server has always allowed but the old client table omitted.
+  const transitions = allowedTransitions(a.status, "ADMIN");
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -373,7 +380,7 @@ function ActionsMenu({ a, mutatingId, onStatus, onDetails }: RowProps) {
               <DropdownMenuItem
                 key={next}
                 onClick={() => onStatus(a, next)}
-                className={next === "CANCELLED" ? "text-rose-600 focus:text-rose-700" : ""}
+                className={next === "CANCELLED" ? "text-rose-600 dark:text-rose-300 focus:text-rose-700 dark:text-rose-200" : ""}
               >
                 {next === "CANCELLED" ? "✕" : "→"} {TRANSITION_LABELS[next] ?? next}
               </DropdownMenuItem>

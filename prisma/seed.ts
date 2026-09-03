@@ -4,12 +4,13 @@
  * payments, treatments, reviews and notifications.
  */
 import { PrismaClient } from "@prisma/client";
-import { createHash } from "crypto";
+
+// Imported rather than re-implemented: this file used to carry its own copy of
+// the salt and hashing call, so changing one without the other would have
+// silently locked every seeded account out.
+import { hashPassword } from "../src/lib/password";
 
 const db = new PrismaClient();
-
-const SALT = "pawcare::v1::";
-const hashPassword = (pw: string) => createHash("sha256").update(SALT + pw).digest("hex");
 
 function fmt(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -20,7 +21,33 @@ function addDays(base: Date, days: number): Date {
   return d;
 }
 
+/**
+ * This script deletes every row in every table before reseeding. Nothing stopped
+ * it running against the production connection string, so it refuses unless the
+ * target is obviously a local database or the caller opts in explicitly.
+ */
+function assertSafeToWipe() {
+  const url = process.env.DATABASE_URL ?? "";
+  const forced = process.env.SEED_FORCE === "true" || process.argv.includes("--force");
+  const isLocal =
+    url.startsWith("file:") || /@(localhost|127\.0\.0\.1|host\.docker\.internal)[:/]/.test(url);
+  const redacted = url.replace(/\/\/[^@]*@/, "//<credentials>@").slice(0, 120) || "(DATABASE_URL not set)";
+
+  if (process.env.NODE_ENV === "production" && !forced) {
+    console.error(`\n✗ Refusing to seed: NODE_ENV=production.\n  Target: ${redacted}\n  Override with SEED_FORCE=true if this is genuinely intended.\n`);
+    process.exit(1);
+  }
+  if (!isLocal && !forced) {
+    console.error(`\n✗ Refusing to seed a remote database - this script DELETES ALL DATA first.\n  Target: ${redacted}\n  Override with SEED_FORCE=true (or --force) if this is genuinely intended.\n`);
+    process.exit(1);
+  }
+
+  console.log(`⚠  Seeding (this deletes all existing data): ${redacted}`);
+}
+
 async function main() {
+  assertSafeToWipe();
+
   console.log("🧹 Clearing existing data...");
   await db.notification.deleteMany();
   await db.review.deleteMany();

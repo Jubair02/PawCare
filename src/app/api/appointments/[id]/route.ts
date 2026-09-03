@@ -5,9 +5,12 @@ import {
   DATE_RE,
   TIME_RE,
   asString,
-  assertSlotFree,
+  assertBookable,
+  assertNoOverlap,
+  getSetting,
   notify,
   readBody,
+  serializableWrite,
   shapeAppointment,
 } from "@/app/api/_lib/shape";
 
@@ -41,7 +44,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const user = await requireUser(req);
     const { id } = await ctx.params;
 
-    const appointment = await db.appointment.findUnique({ where: { id } });
+    const appointment = await db.appointment.findUnique({
+      where: { id },
+      include: { service: { select: { duration: true } } },
+    });
     if (!appointment) throw new ApiError("Appointment not found.", 404);
 
     const isStaffAdmin = user.role === "STAFF" || user.role === "ADMIN";
@@ -51,6 +57,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
     }
     if (!isStaffAdmin && appointment.status !== "PENDING") {
       throw new ApiError("Only pending appointments can be rescheduled. Please contact us to change a confirmed booking.", 403);
+    }
+    // Terminal states are closed to everyone, staff included.
+    if (appointment.status === "COMPLETED" || appointment.status === "CANCELLED") {
+      throw new ApiError(`A ${appointment.status.toLowerCase()} appointment cannot be rescheduled.`, 409);
     }
 
     const body = await readBody(req);
@@ -64,17 +74,25 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const newDate = date ?? appointment.date;
     const newTime = time ?? appointment.time;
     const slotChanged = newDate !== appointment.date || newTime !== appointment.time;
+    const duration = appointment.service.duration;
+
     if (slotChanged) {
-      await assertSlotFree(appointment.providerId, newDate, newTime, id);
+      const setting = await getSetting();
+      assertBookable(newDate, newTime, duration, setting);
     }
 
-    await db.appointment.update({
-      where: { id },
-      data: {
-        ...(date !== undefined ? { date } : {}),
-        ...(time !== undefined ? { time } : {}),
-        ...(notes !== undefined ? { notes } : {}),
-      },
+    await serializableWrite(async (tx) => {
+      if (slotChanged) {
+        await assertNoOverlap(tx, appointment.providerId, newDate, newTime, duration, id);
+      }
+      await tx.appointment.update({
+        where: { id },
+        data: {
+          ...(date !== undefined ? { date } : {}),
+          ...(time !== undefined ? { time } : {}),
+          ...(notes !== undefined ? { notes } : {}),
+        },
+      });
     });
 
     const full = await db.appointment.findUnique({ where: { id }, include: APPOINTMENT_INCLUDE });

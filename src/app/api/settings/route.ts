@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { ApiError, handleError, json, requireRole } from "@/lib/auth";
-import { TIME_RE, asNumber, asString, getSetting, readBody } from "@/app/api/_lib/shape";
+import { EMAIL_RE, TIME_RE, asNumber, asString, getSetting, readBody, timeToMinutes } from "@/app/api/_lib/shape";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +40,10 @@ export async function PATCH(req: Request) {
     const phone = asString(body.phone);
     if (phone !== undefined) data.phone = phone;
     const email = asString(body.email);
-    if (email !== undefined) data.email = email;
+    if (email !== undefined) {
+      if (!EMAIL_RE.test(email)) throw new ApiError("A valid clinic email is required.", 400);
+      data.email = email;
+    }
 
     const openTime = asString(body.openTime);
     if (openTime !== undefined) {
@@ -60,16 +63,26 @@ export async function PATCH(req: Request) {
       data.slotMinutes = slotMinutes;
     }
 
-    if (data.openTime && data.closeTime === undefined) {
+    // Validate the resulting window, not just the field that happened to be sent.
+    // The old pair of guards only fired when exactly one of the two times was
+    // present, so the admin form - which always sends both - could save
+    // open=18:00 / close=09:00 and silently make every slot list empty.
+    if (data.openTime !== undefined || data.closeTime !== undefined || data.slotMinutes !== undefined) {
       const current = await getSetting();
-      if (timeToMinutesSafe(data.openTime) >= timeToMinutesSafe(current.closeTime)) {
-        throw new ApiError("openTime must be before closeTime.", 400);
+      const openTime = data.openTime ?? current.openTime;
+      const closeTime = data.closeTime ?? current.closeTime;
+      const slotMinutes = data.slotMinutes ?? current.slotMinutes;
+
+      const open = timeToMinutes(openTime);
+      const close = timeToMinutes(closeTime);
+      if (open >= close) {
+        throw new ApiError("Opening time must be before closing time.", 400);
       }
-    }
-    if (data.closeTime && data.openTime === undefined) {
-      const current = await getSetting();
-      if (timeToMinutesSafe(current.openTime) >= timeToMinutesSafe(data.closeTime)) {
-        throw new ApiError("closeTime must be after openTime.", 400);
+      if (slotMinutes > close - open) {
+        throw new ApiError(
+          `A ${slotMinutes}-minute slot does not fit between ${openTime} and ${closeTime}.`,
+          400,
+        );
       }
     }
 
@@ -80,7 +93,3 @@ export async function PATCH(req: Request) {
   }
 }
 
-function timeToMinutesSafe(t: string): number {
-  const [h, m] = t.split(":").map(Number);
-  return h * 60 + (m || 0);
-}

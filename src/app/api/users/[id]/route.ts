@@ -1,20 +1,29 @@
 import { db } from "@/lib/db";
 import { ApiError, handleError, json, publicUser, requireRole } from "@/lib/auth";
-import { ROLES, asBoolean, asString, readBody } from "@/app/api/_lib/shape";
+import { hashPassword } from "@/lib/password";
+import { ROLES, asBoolean, asString, notify, readBody } from "@/app/api/_lib/shape";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-/** PATCH /api/users/:id — ADMIN only. */
+/** PATCH /api/users/:id — ADMIN only. Also the account-recovery path (password reset). */
 export async function PATCH(req: Request, ctx: Ctx) {
   try {
-    await requireRole(req, "ADMIN");
+    const admin = await requireRole(req, "ADMIN");
     const { id } = await ctx.params;
     const body = await readBody(req);
 
     const target = await db.user.findUnique({ where: { id } });
     if (!target) throw new ApiError("User not found.", 404);
 
-    const data: { name?: string; phone?: string; role?: string; specialty?: string; active?: boolean; bio?: string } = {};
+    const data: {
+      name?: string;
+      phone?: string;
+      role?: string;
+      specialty?: string;
+      active?: boolean;
+      bio?: string;
+      password?: string;
+    } = {};
 
     const name = asString(body.name);
     if (name !== undefined) {
@@ -35,7 +44,48 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const bio = asString(body.bio);
     if (bio !== undefined) data.bio = bio;
 
+    // Account recovery: forgot-password is a stub with no mailer, so an admin
+    // resetting the password is the supported way back into a locked-out account.
+    const password = asString(body.password);
+    if (password !== undefined) {
+      if (password.length < 6) throw new ApiError("Password must be at least 6 characters.", 400);
+      data.password = hashPassword(password);
+    }
+
+    // Lockout guards. DELETE already blocks self-deletion; without these an admin
+    // could demote or deactivate themselves (or the last admin) and lock everyone out.
+    const isSelf = target.id === admin.id;
+    if (isSelf && role !== undefined && role !== target.role) {
+      throw new ApiError("You cannot change your own role. Ask another admin to do it.", 400);
+    }
+    if (isSelf && active === false) {
+      throw new ApiError("You cannot deactivate your own account.", 400);
+    }
+
+    const losesAdmin = (role !== undefined && role !== "ADMIN") || active === false;
+    if (target.role === "ADMIN" && losesAdmin) {
+      const otherAdmins = await db.user.count({
+        where: { role: "ADMIN", active: true, id: { not: target.id } },
+      });
+      if (otherAdmins === 0) {
+        throw new ApiError(
+          "This is the last active admin account. Promote another admin before changing this one.",
+          409,
+        );
+      }
+    }
+
     const updated = await db.user.update({ where: { id }, data });
+
+    if (data.password) {
+      await notify(
+        updated.id,
+        "Password reset",
+        "An administrator reset your password. If you did not request this, contact the clinic.",
+        "SYSTEM",
+      );
+    }
+
     return json({ user: publicUser(updated) });
   } catch (e) {
     return handleError(e);

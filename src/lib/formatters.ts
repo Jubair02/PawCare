@@ -1,3 +1,28 @@
+/**
+ * Clinic timezone for display. Mirrors CLINIC_TZ on the server so a date shown
+ * in a table matches the day the API counted it under.
+ */
+export const CLINIC_TZ = process.env.NEXT_PUBLIC_CLINIC_TIMEZONE || "Asia/Dhaka";
+
+/**
+ * ISO instant → "2025-11-20" in clinic time.
+ *
+ * Replaces `new Date(iso).toISOString().slice(0, 10)`, which rendered the UTC
+ * date: a payment taken at 02:00 in Dhaka was shown as the previous day.
+ */
+export function formatInstantDate(iso: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  // en-CA formats as yyyy-MM-dd.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: CLINIC_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
+
 /** ৳ money with en-IN grouping: 1200 → "৳1,200" */
 export function formatBDT(n: number): string {
   const safe = Number.isFinite(n) ? n : 0;

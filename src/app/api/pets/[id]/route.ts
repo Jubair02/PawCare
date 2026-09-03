@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { ApiError, handleError, json, requireUser } from "@/lib/auth";
-import { APPOINTMENT_INCLUDE, PET_GENDERS, PET_TYPES, TREATMENT_INCLUDE, VACCINATION_STATUSES, asNumber, asString, readBody, shapeAppointment, shapePet, shapeTreatment } from "@/app/api/_lib/shape";
+import { APPOINTMENT_INCLUDE, PET_GENDERS, PET_TYPES, TREATMENT_INCLUDE, VACCINATION_STATUSES, asNumber, asString, assertValidPhoto, readBody, shapeAppointment, shapePet, shapeTreatment } from "@/app/api/_lib/shape";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -90,7 +90,10 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const color = asString(body.color);
     if (color !== undefined) data.color = color;
     const photo = asString(body.photo);
-    if (photo !== undefined) data.photo = photo;
+    if (photo !== undefined) {
+      assertValidPhoto(photo);
+      data.photo = photo;
+    }
     const medicalNotes = asString(body.medicalNotes);
     if (medicalNotes !== undefined) data.medicalNotes = medicalNotes;
     const vaccinationStatus = asString(body.vaccinationStatus);

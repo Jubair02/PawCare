@@ -12,8 +12,9 @@ import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api";
+import { ListNotice } from "@/components/shared/list-notice";
 import { formatDate, formatTime, petEmoji } from "@/lib/formatters";
-import type { TreatmentDTO } from "@/lib/types";
+import type { PageMeta, TreatmentDTO } from "@/lib/types";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -89,7 +90,7 @@ function TreatmentCard({ t }: { t: TreatmentDTO }) {
               </span>
             ) : null}
             {t.followUpDate ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-100 px-2.5 py-1 text-xs font-medium text-amber-800">
+              <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 dark:border-amber-900 bg-amber-100 dark:bg-amber-950/50 px-2.5 py-1 text-xs font-medium text-amber-800 dark:text-amber-200">
                 <CalendarClock className="size-3.5" /> Follow-up: {formatDate(t.followUpDate)}
               </span>
             ) : null}
@@ -108,11 +109,16 @@ export function CustomerTreatmentsView() {
   const [treatments, setTreatments] = useState<TreatmentDTO[] | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   useEffect(() => {
     let alive = true;
-    apiFetch<{ treatments: TreatmentDTO[] }>("/api/treatments")
+    apiFetch<{ treatments: TreatmentDTO[]; page?: PageMeta }>("/api/treatments")
       .then((res) => {
-        if (alive) setTreatments(res.treatments);
+        if (alive) {
+          setTreatments(res.treatments);
+          setPage(res.page ?? null);
+        }
       })
       .catch((err: Error) => {
         if (alive) toast.error(err.message);
@@ -144,6 +150,7 @@ export function CustomerTreatmentsView() {
         title="Medical Records"
         description="Treatment history for each of your companions"
       />
+      <ListNotice page={page} noun="records" />
 
       {loading ? (
         <div className="space-y-6">

@@ -6,10 +6,10 @@ export type StatTone = "default" | "amber" | "rose" | "violet" | "teal";
 
 const TONE_STYLES: Record<StatTone, string> = {
   default: "bg-primary/10 text-primary",
-  amber: "bg-amber-100 text-amber-600",
-  rose: "bg-rose-100 text-rose-600",
-  violet: "bg-violet-100 text-violet-600",
-  teal: "bg-teal-100 text-teal-600",
+  amber: "bg-amber-100 dark:bg-amber-950/50 text-amber-600 dark:text-amber-300",
+  rose: "bg-rose-100 dark:bg-rose-950/50 text-rose-600 dark:text-rose-300",
+  violet: "bg-violet-100 dark:bg-violet-950/50 text-violet-600 dark:text-violet-300",
+  teal: "bg-teal-100 dark:bg-teal-950/50 text-teal-600 dark:text-teal-300",
 };
 
 export function StatCard({

@@ -16,17 +16,18 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api";
+import { ListNotice } from "@/components/shared/list-notice";
 import { cn } from "@/lib/utils";
 import { timeAgo } from "@/lib/formatters";
-import type { NotificationDTO, NotificationsResponse } from "@/lib/types";
+import type { NotificationDTO, NotificationsResponse, PageMeta } from "@/lib/types";
 import { SectionHeader } from "./section-header";
 
 const TYPE_ICONS: Record<string, { icon: LucideIcon; cls: string }> = {
-  BOOKING: { icon: CalendarPlus, cls: "bg-teal-100 text-teal-600" },
-  STATUS: { icon: RefreshCw, cls: "bg-violet-100 text-violet-600" },
-  PAYMENT: { icon: Wallet, cls: "bg-emerald-100 text-emerald-600" },
-  TREATMENT: { icon: Stethoscope, cls: "bg-rose-100 text-rose-600" },
-  SYSTEM: { icon: Bell, cls: "bg-amber-100 text-amber-600" },
+  BOOKING: { icon: CalendarPlus, cls: "bg-teal-100 dark:bg-teal-950/50 text-teal-600 dark:text-teal-300" },
+  STATUS: { icon: RefreshCw, cls: "bg-violet-100 dark:bg-violet-950/50 text-violet-600 dark:text-violet-300" },
+  PAYMENT: { icon: Wallet, cls: "bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-300" },
+  TREATMENT: { icon: Stethoscope, cls: "bg-rose-100 dark:bg-rose-950/50 text-rose-600 dark:text-rose-300" },
+  SYSTEM: { icon: Bell, cls: "bg-amber-100 dark:bg-amber-950/50 text-amber-600 dark:text-amber-300" },
 };
 
 function TypeIcon({ type }: { type: string }) {
@@ -46,11 +47,14 @@ export function NotificationsView() {
   const [markingAll, setMarkingAll] = useState(false);
   const [markingId, setMarkingId] = useState<string | null>(null);
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   const load = useCallback(async () => {
     try {
       const res = await apiFetch<NotificationsResponse>("/api/notifications");
       setNotifications(res.notifications);
       setUnread(res.unread);
+      setPage(res.page ?? null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to load notifications");
     } finally {
@@ -109,6 +113,7 @@ export function NotificationsView() {
           Mark all read
         </Button>
       </SectionHeader>
+      <ListNotice page={page} noun="notifications" />
 
       <Card className="gap-0 p-2">
         {loading ? (

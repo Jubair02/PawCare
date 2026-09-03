@@ -1,6 +1,6 @@
 # PawCare — Shared Worklog
 
-Multi-agent build of the **Pet Care Platform MVP** (Next.js 16 App Router SPA on `/`, TypeScript, Prisma + SQLite, shadcn/ui).
+Multi-agent build of the **Pet Care Platform MVP** (Next.js 16 App Router SPA on `/`, TypeScript, Prisma + Neon PostgreSQL, shadcn/ui).
 
 ---
 

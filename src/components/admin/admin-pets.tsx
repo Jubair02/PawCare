@@ -26,22 +26,23 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { apiFetch } from "@/lib/api";
-import { formatDate, initials, petEmoji } from "@/lib/formatters";
-import type { PetDTO } from "@/lib/types";
+import { ListNotice } from "@/components/shared/list-notice";
+import { formatDate, formatInstantDate, initials, petEmoji } from "@/lib/formatters";
+import type { PageMeta, PetDTO } from "@/lib/types";
 
 /* ------------------------------- constants -------------------------------- */
 
 const TYPE_BADGE: Record<string, string> = {
-  DOG: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  CAT: "bg-amber-100 text-amber-800 border-amber-200",
-  BIRD: "bg-teal-100 text-teal-800 border-teal-200",
-  OTHER: "bg-stone-100 text-stone-700 border-stone-200",
+  DOG: "bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-900",
+  CAT: "bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-200 border-amber-200 dark:border-amber-900",
+  BIRD: "bg-teal-100 dark:bg-teal-950/50 text-teal-800 dark:text-teal-200 border-teal-200 dark:border-teal-900",
+  OTHER: "bg-stone-100 dark:bg-stone-950/50 text-stone-700 dark:text-stone-200 border-stone-200 dark:border-stone-900",
 };
 
 const TYPE_TABS = ["ALL", "DOG", "CAT", "BIRD", "OTHER"];
 
 /** ISO datetime → "20 Nov 2025" (formatDate expects yyyy-MM-dd). */
-const fmtJoined = (iso: string) => (iso ? new Date(iso).toISOString().slice(0, 10) : "");
+const fmtJoined = formatInstantDate;
 
 /** "yyyy-MM-dd" → "2y 6mo" style age label. */
 function calcAge(birthDate?: string): string {
@@ -76,14 +77,17 @@ export function AdminPetsView() {
     return () => clearTimeout(t);
   }, [search]);
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       if (q) params.set("q", q);
       const qs = params.toString();
-      const res = await apiFetch<{ pets: PetDTO[] }>(`/api/pets${qs ? `?${qs}` : ""}`);
+      const res = await apiFetch<{ pets: PetDTO[]; page?: PageMeta }>(`/api/pets${qs ? `?${qs}` : ""}`);
       setPets(res.pets);
+      setPage(res.page ?? null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to load pets");
       setPets(null);
@@ -105,6 +109,7 @@ export function AdminPetsView() {
           <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /> Refresh
         </Button>
       </SectionHeader>
+      <ListNotice page={page} noun="pets" />
 
       {/* Filters */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -330,11 +335,11 @@ export function AdminPetsView() {
                 </div>
 
                 {/* Medical notes */}
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                  <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-800">
+                <div className="rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 p-3">
+                  <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-800 dark:text-amber-200">
                     <Syringe className="size-3.5" /> Medical notes
                   </p>
-                  <p className="mt-1 text-sm text-amber-900">
+                  <p className="mt-1 text-sm text-amber-900 dark:text-amber-200">
                     {detail.medicalNotes || "No medical notes recorded."}
                   </p>
                 </div>

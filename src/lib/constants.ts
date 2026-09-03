@@ -15,7 +15,20 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
+import {
+  PAYMENT_METHOD_VALUES,
+  PET_TYPE_VALUES,
+  SERVICE_CATEGORY_VALUES,
+  STATUS_FLOW as DOMAIN_STATUS_FLOW,
+  VACCINATION_STATUS_VALUES,
+} from "./domain";
 import type { AppointmentStatus, PaymentMethod, Role, ServiceCategory, VaccinationStatus } from "./types";
+
+export { allowedTransitions } from "./domain";
+
+/** Mirrors DEFAULT_PAGE_SIZE / MAX_PAGE_SIZE in the API paging helper. */
+export const DEFAULT_PAGE_SIZE = 200;
+export const MAX_PAGE_SIZE = 500;
 
 export interface NavItem {
   view: string;
@@ -97,22 +110,7 @@ export const DEMO_ACCOUNTS: DemoAccount[] = [
 ];
 
 /** Happy-path status flow (CANCELLED possible from PENDING/CONFIRMED/CHECKED_IN). */
-export const STATUS_FLOW: AppointmentStatus[] = [
-  "PENDING",
-  "CONFIRMED",
-  "CHECKED_IN",
-  "IN_PROGRESS",
-  "COMPLETED",
-];
-
-export const STATUS_TRANSITIONS: Record<AppointmentStatus, AppointmentStatus[]> = {
-  PENDING: ["CONFIRMED", "CANCELLED"],
-  CONFIRMED: ["CHECKED_IN", "CANCELLED"],
-  CHECKED_IN: ["IN_PROGRESS", "CANCELLED"],
-  IN_PROGRESS: ["COMPLETED"],
-  COMPLETED: [],
-  CANCELLED: [],
-};
+export const STATUS_FLOW = [...DOMAIN_STATUS_FLOW] as AppointmentStatus[];
 
 export interface Option<T extends string = string> {
   value: T;
@@ -120,30 +118,49 @@ export interface Option<T extends string = string> {
   emoji?: string;
 }
 
-export const PET_TYPES: Option[] = [
-  { value: "DOG", label: "Dog", emoji: "🐶" },
-  { value: "CAT", label: "Cat", emoji: "🐱" },
-  { value: "BIRD", label: "Bird", emoji: "🐦" },
-  { value: "OTHER", label: "Other", emoji: "🐾" },
-];
+/**
+ * The option lists below carry UI copy only. Their *values* come from
+ * `src/lib/domain.ts`, which the API validates against, so a value can no
+ * longer exist in one half of the app and not the other.
+ */
+const PET_TYPE_UI: Record<string, { label: string; emoji: string }> = {
+  DOG: { label: "Dog", emoji: "🐶" },
+  CAT: { label: "Cat", emoji: "🐱" },
+  BIRD: { label: "Bird", emoji: "🐦" },
+  OTHER: { label: "Other", emoji: "🐾" },
+};
+export const PET_TYPES: Option[] = PET_TYPE_VALUES.map((value) => ({
+  value,
+  ...PET_TYPE_UI[value],
+}));
 
-export const SERVICE_CATEGORIES: Option<ServiceCategory>[] = [
-  { value: "MEDICAL", label: "Medical" },
-  { value: "GROOMING", label: "Grooming" },
-  { value: "DIAGNOSTIC", label: "Diagnostic" },
-];
+const SERVICE_CATEGORY_UI: Record<string, string> = {
+  MEDICAL: "Medical",
+  GROOMING: "Grooming",
+  DIAGNOSTIC: "Diagnostic",
+};
+export const SERVICE_CATEGORIES: Option<ServiceCategory>[] = SERVICE_CATEGORY_VALUES.map(
+  (value) => ({ value: value as ServiceCategory, label: SERVICE_CATEGORY_UI[value] })
+);
 
-export const VACCINATION_STATUSES: Option<VaccinationStatus>[] = [
-  { value: "UP_TO_DATE", label: "Up to date" },
-  { value: "PARTIAL", label: "Partial" },
-  { value: "NONE", label: "None" },
-];
+const VACCINATION_STATUS_UI: Record<string, string> = {
+  UP_TO_DATE: "Up to date",
+  PARTIAL: "Partial",
+  NONE: "None",
+};
+export const VACCINATION_STATUSES: Option<VaccinationStatus>[] = VACCINATION_STATUS_VALUES.map(
+  (value) => ({ value: value as VaccinationStatus, label: VACCINATION_STATUS_UI[value] })
+);
 
-export const PAYMENT_METHODS: Option<PaymentMethod>[] = [
-  { value: "CASH", label: "Cash" },
-  { value: "CARD", label: "Card" },
-  { value: "MOBILE", label: "Mobile Banking" },
-];
+const PAYMENT_METHOD_UI: Record<string, string> = {
+  CASH: "Cash",
+  CARD: "Card",
+  MOBILE: "Mobile Banking",
+};
+export const PAYMENT_METHODS: Option<PaymentMethod>[] = PAYMENT_METHOD_VALUES.map((value) => ({
+  value: value as PaymentMethod,
+  label: PAYMENT_METHOD_UI[value],
+}));
 
 /** Landing page anchors (also used by the public footer quick links). */
 export const LANDING_ANCHORS = [

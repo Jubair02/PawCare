@@ -22,8 +22,9 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { apiFetch } from "@/lib/api";
+import { ListNotice } from "@/components/shared/list-notice";
 import { timeAgo } from "@/lib/formatters";
-import type { ReviewDTO } from "@/lib/types";
+import type { PageMeta, ReviewDTO } from "@/lib/types";
 
 /* ------------------------------- constants -------------------------------- */
 
@@ -45,11 +46,14 @@ export function AdminReviewsView() {
   const [deleteTarget, setDeleteTarget] = useState<ReviewDTO | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiFetch<{ reviews: ReviewDTO[] }>("/api/reviews?status=ALL");
+      const res = await apiFetch<{ reviews: ReviewDTO[]; page?: PageMeta }>("/api/reviews?status=ALL");
       setReviews(res.reviews);
+      setPage(res.page ?? null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to load reviews");
       setReviews(null);
@@ -116,6 +120,7 @@ export function AdminReviewsView() {
           <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /> Refresh
         </Button>
       </SectionHeader>
+      <ListNotice page={page} noun="reviews" />
 
       {/* Filter tabs with counts */}
       <Tabs value={tab} onValueChange={setTab}>
@@ -126,7 +131,7 @@ export function AdminReviewsView() {
               <span
                 className={`ml-1.5 rounded-full px-1.5 text-xs font-semibold ${
                   t.value === "PENDING" && counts.PENDING > 0
-                    ? "bg-amber-100 text-amber-700"
+                    ? "bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-200"
                     : "bg-muted text-muted-foreground"
                 }`}
               >
@@ -280,7 +285,7 @@ function ReviewCard({
         <Button
           variant="ghost"
           size="icon"
-          className="size-10 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+          className="size-10 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:bg-rose-950/40 hover:text-rose-700 dark:text-rose-200"
           disabled={busy}
           onClick={onDelete}
           aria-label="Delete review"

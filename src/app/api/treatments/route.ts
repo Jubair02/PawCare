@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { ApiError, handleError, json, requireRole, requireUser } from "@/lib/auth";
 import type { Prisma } from "@prisma/client";
-import { TREATMENT_INCLUDE, asString, notify, readBody, shapeTreatment } from "@/app/api/_lib/shape";
+import { DATE_RE, TREATMENT_INCLUDE, asString, notify, pageMeta, readBody, readPage, shapeTreatment } from "@/app/api/_lib/shape";
 
 /**
  * GET /api/treatments — role-scoped. ?petId=&customerId=&providerId=
@@ -27,12 +27,12 @@ export async function GET(req: Request) {
     const petId = url.searchParams.get("petId");
     if (petId) where.petId = petId;
 
-    const treatments = await db.treatment.findMany({
-      where,
-      include: TREATMENT_INCLUDE,
-      orderBy: { createdAt: "desc" },
-    });
-    return json({ treatments: treatments.map(shapeTreatment) });
+    const page = readPage(url);
+    const [treatments, total] = await Promise.all([
+      db.treatment.findMany({ where, include: TREATMENT_INCLUDE, orderBy: { createdAt: "desc" }, ...page }),
+      db.treatment.count({ where }),
+    ]);
+    return json({ treatments: treatments.map(shapeTreatment), page: pageMeta(total, page) });
   } catch (e) {
     return handleError(e);
   }
@@ -55,6 +55,18 @@ export async function POST(req: Request) {
       throw new ApiError("You can only add treatment records to your own appointments.", 403);
     }
 
+    // Respect the appointment state machine: a record belongs to a visit that is
+    // actually happening (IN_PROGRESS -> COMPLETED) or already finished (an edit).
+    // Previously this forced any status, including CANCELLED, straight to COMPLETED.
+    if (appointment.status !== "IN_PROGRESS" && appointment.status !== "COMPLETED") {
+      throw new ApiError(
+        `A treatment record can only be added once the appointment is in progress. This one is ${appointment.status
+          .replace(/_/g, " ")
+          .toLowerCase()}.`,
+        409,
+      );
+    }
+
     const data = {
       symptoms: asString(body.symptoms) ?? null,
       diagnosis: asString(body.diagnosis) ?? null,
@@ -65,6 +77,15 @@ export async function POST(req: Request) {
       followUpDate: asString(body.followUpDate) ?? null,
       notes: asString(body.notes) ?? null,
     };
+
+    // A record with nothing clinical in it is not a record. Previously an empty
+    // POST was accepted and silently closed the visit.
+    if (!data.diagnosis && !data.treatmentPlan) {
+      throw new ApiError("A diagnosis or a treatment plan is required.", 400);
+    }
+    if (data.followUpDate && !DATE_RE.test(data.followUpDate)) {
+      throw new ApiError("Follow-up date must be in yyyy-MM-dd format.", 400);
+    }
 
     const existing = await db.treatment.findUnique({ where: { appointmentId } });
     if (existing) {
@@ -80,20 +101,27 @@ export async function POST(req: Request) {
       });
     }
 
-    if (appointment.status !== "COMPLETED") {
+    // Completing the visit is now an explicit, separate decision. Saving a record
+    // used to close the appointment as a side effect, with no way to save a
+    // work-in-progress note.
+    const complete = body.complete === true;
+    const completedNow = complete && appointment.status !== "COMPLETED";
+    if (completedNow) {
       await db.appointment.update({ where: { id: appointmentId }, data: { status: "COMPLETED" } });
     }
 
     await notify(
       appointment.customerId,
-      "Treatment record added",
-      `A treatment record for ${appointment.pet.name} (${appointment.service.name}) was added. The appointment is now completed.`,
+      existing ? "Treatment record updated" : "Treatment record added",
+      `The treatment record for ${appointment.pet.name} (${appointment.service.name}) was ${
+        existing ? "updated" : "added"
+      }.${completedNow ? " The appointment is now completed." : ""}`,
       "TREATMENT",
     );
 
     const treatment = await db.treatment.findUnique({ where: { appointmentId }, include: TREATMENT_INCLUDE });
     if (!treatment) throw new ApiError("Treatment could not be loaded.", 500);
-    return json({ treatment: shapeTreatment(treatment) }, 201);
+    return json({ treatment: shapeTreatment(treatment) }, existing ? 200 : 201);
   } catch (e) {
     return handleError(e);
   }

@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { ApiError, getAuthUser, handleError, json, requireRole } from "@/lib/auth";
-import { REVIEW_INCLUDE, asString, readBody, shapeReview } from "@/app/api/_lib/shape";
+import { REVIEW_INCLUDE, asString, pageMeta, readBody, readPage, shapeReview } from "@/app/api/_lib/shape";
 
 /**
  * GET /api/reviews — public default APPROVED.
@@ -37,12 +37,12 @@ export async function GET(req: Request) {
     const providerId = url.searchParams.get("providerId");
     if (providerId) where.providerId = providerId;
 
-    const reviews = await db.review.findMany({
-      where,
-      include: REVIEW_INCLUDE,
-      orderBy: { createdAt: "desc" },
-    });
-    return json({ reviews: reviews.map(shapeReview) });
+    const page = readPage(url);
+    const [reviews, total] = await Promise.all([
+      db.review.findMany({ where, include: REVIEW_INCLUDE, orderBy: { createdAt: "desc" }, ...page }),
+      db.review.count({ where }),
+    ]);
+    return json({ reviews: reviews.map(shapeReview), page: pageMeta(total, page) });
   } catch (e) {
     return handleError(e);
   }

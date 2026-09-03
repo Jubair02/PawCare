@@ -46,9 +46,9 @@ import type { ServiceDTO } from "@/lib/types";
 /* ------------------------------- constants -------------------------------- */
 
 const CATEGORY_BADGE: Record<string, string> = {
-  MEDICAL: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  GROOMING: "bg-amber-100 text-amber-800 border-amber-200",
-  DIAGNOSTIC: "bg-teal-100 text-teal-800 border-teal-200",
+  MEDICAL: "bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-900",
+  GROOMING: "bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-200 border-amber-200 dark:border-amber-900",
+  DIAGNOSTIC: "bg-teal-100 dark:bg-teal-950/50 text-teal-800 dark:text-teal-200 border-teal-200 dark:border-teal-900",
 };
 
 const ICON_PRESETS = ["🩺", "💉", "🦷", "✂️", "🛁", "🐕", "🏥", "🧪", "🐾"];
@@ -317,7 +317,7 @@ export function AdminServicesView() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="size-10 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                          className="size-10 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:bg-rose-950/40 hover:text-rose-700 dark:text-rose-200"
                           onClick={() => setDeleteTarget(s)}
                           aria-label={`Delete ${s.name}`}
                         >
@@ -380,7 +380,7 @@ export function AdminServicesView() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="size-10 text-rose-600"
+                          className="size-10 text-rose-600 dark:text-rose-300"
                           onClick={() => setDeleteTarget(s)}
                           aria-label={`Delete ${s.name}`}
                         >

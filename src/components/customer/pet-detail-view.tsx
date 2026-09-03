@@ -271,6 +271,8 @@ function EditPetDialog({
                 <img
                   src={photo}
                   alt="Pet preview"
+                  loading="lazy"
+                  decoding="async"
                   className="h-14 w-14 rounded-xl border object-cover"
                 />
               ) : (
@@ -377,6 +379,8 @@ export function PetDetailView() {
                 <img
                   src={pet.photo}
                   alt={pet.name}
+                  loading="lazy"
+                  decoding="async"
                   className="h-32 w-32 rounded-2xl border object-cover shadow-sm"
                 />
               ) : (
@@ -416,8 +420,8 @@ export function PetDetailView() {
                 ) : null}
               </div>
               {pet.medicalNotes ? (
-                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
-                  <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-800">
+                <div className="mt-4 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 p-3">
+                  <p className="flex items-center gap-1.5 text-xs font-semibold text-amber-800 dark:text-amber-200">
                     <Droplet className="size-3.5" /> Medical notes
                   </p>
                   <p className="mt-1 text-sm text-amber-900/90">{pet.medicalNotes}</p>
@@ -541,7 +545,7 @@ export function PetDetailView() {
                         </span>
                       ) : null}
                       {t.followUpDate ? (
-                        <span className="rounded-full border border-amber-200 bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-800">
+                        <span className="rounded-full border border-amber-200 dark:border-amber-900 bg-amber-100 dark:bg-amber-950/50 px-2.5 py-0.5 text-xs font-medium text-amber-800 dark:text-amber-200">
                           Follow-up: {formatDate(t.followUpDate)}
                         </span>
                       ) : null}

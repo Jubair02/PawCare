@@ -6,6 +6,7 @@ import { AppShell } from "@/components/shell/app-shell";
 import { LandingView } from "@/components/landing/landing-view";
 import { AuthView } from "@/components/auth/auth-view";
 import { useAppStore } from "@/lib/store";
+import { useViewUrlSync } from "@/hooks/use-view-url-sync";
 import { NotificationsView } from "@/components/shared/notifications-view";
 import { ProfileView } from "@/components/shared/profile-view";
 
@@ -90,8 +91,16 @@ const VIEWS: Record<string, ComponentType> = {
   "admin-settings": AdminSettingsView,
 };
 
+/** Only keys in the registry above are accepted from the address bar. */
+function isValidView(view: string): boolean {
+  return Object.prototype.hasOwnProperty.call(VIEWS, view);
+}
+
 export default function Page() {
   const view = useAppStore((s) => s.view) || "landing";
+
+  // Keeps `?view=` and the store in step, so views are linkable and Back works.
+  useViewUrlSync(isValidView);
 
   const ViewComponent = VIEWS[view] ?? LandingView;
 

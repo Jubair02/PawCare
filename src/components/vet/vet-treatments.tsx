@@ -11,9 +11,10 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { apiFetch } from "@/lib/api";
+import { ListNotice } from "@/components/shared/list-notice";
 import { formatDate, petEmoji } from "@/lib/formatters";
 import { useAppStore } from "@/lib/store";
-import type { TreatmentDTO } from "@/lib/types";
+import type { PageMeta, TreatmentDTO } from "@/lib/types";
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : "Something went wrong";
@@ -26,10 +27,13 @@ export function VetTreatmentsView() {
 
   const isVet = user?.role === "VET";
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   const load = useCallback(async () => {
     try {
-      const res = await apiFetch<{ treatments: TreatmentDTO[] }>("/api/treatments");
+      const res = await apiFetch<{ treatments: TreatmentDTO[]; page?: PageMeta }>("/api/treatments");
       setTreatments(res.treatments);
+      setPage(res.page ?? null);
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -51,6 +55,7 @@ export function VetTreatmentsView() {
             : "Grooming notes you have logged, newest first."
         }
       />
+      <ListNotice page={page} noun="records" />
 
       {loading ? (
         <div className="space-y-3">
@@ -138,7 +143,7 @@ export function VetTreatmentsView() {
                       {t.followUpDate ? (
                         <Badge
                           variant="outline"
-                          className="border-amber-200 bg-amber-50 text-amber-800"
+                          className="border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200"
                         >
                           <CalendarDays className="mr-1 size-3" />
                           Follow-up {formatDate(t.followUpDate)}

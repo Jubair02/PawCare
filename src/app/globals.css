@@ -68,6 +68,15 @@
   --chart-3: oklch(0.62 0.1 185);
   --chart-4: oklch(0.61 0.19 300);
   --chart-5: oklch(0.63 0.21 25);
+
+  /* Appointment-status colours, used by the charts so they follow the theme.
+     These were previously hex literals inlined in the dashboard components. */
+  --status-pending: oklch(0.77 0.16 70);
+  --status-confirmed: oklch(0.7 0.14 163);
+  --status-checked-in: oklch(0.6 0.1 190);
+  --status-in-progress: oklch(0.61 0.19 300);
+  --status-completed: oklch(0.72 0.19 145);
+  --status-cancelled: oklch(0.65 0.22 15);
   --sidebar: oklch(0.982 0.006 170);
   --sidebar-foreground: oklch(0.24 0.015 170);
   --sidebar-primary: oklch(0.55 0.115 165);
@@ -102,6 +111,14 @@
   --chart-3: oklch(0.62 0.1 185);
   --chart-4: oklch(0.61 0.19 300);
   --chart-5: oklch(0.63 0.21 25);
+
+  /* Lifted for contrast against the dark surface. */
+  --status-pending: oklch(0.82 0.15 70);
+  --status-confirmed: oklch(0.78 0.14 163);
+  --status-checked-in: oklch(0.72 0.1 190);
+  --status-in-progress: oklch(0.72 0.17 300);
+  --status-completed: oklch(0.8 0.17 145);
+  --status-cancelled: oklch(0.72 0.19 15);
   --sidebar: oklch(0.2 0.02 172);
   --sidebar-foreground: oklch(0.96 0.01 165);
   --sidebar-primary: oklch(0.7 0.14 163);
@@ -139,4 +156,18 @@
 }
 .scrollbar-thin::-webkit-scrollbar-thumb:hover {
   background: oklch(0.72 0.07 166);
+}
+
+/* Respect the OS reduce-motion setting for CSS animation and transitions.
+   framer-motion is handled separately by MotionConfig in app/providers.tsx,
+   because it animates from JavaScript and CSS cannot reach it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

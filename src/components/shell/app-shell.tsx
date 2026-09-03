@@ -44,12 +44,14 @@ import type { NotificationDTO, NotificationsResponse, Role, SettingDTO } from "@
 import { cn } from "@/lib/utils";
 import { NotificationsMiniList } from "@/components/shared/notifications-view";
 import { ProfileView } from "@/components/shared/profile-view";
+import { SiteFooter } from "@/components/shared/site-footer";
+import { ThemeToggle } from "@/components/shared/theme-toggle";
 
 const ROLE_BADGE: Record<Role, string> = {
-  ADMIN: "bg-violet-100 text-violet-800 border-violet-200",
-  STAFF: "bg-teal-100 text-teal-800 border-teal-200",
-  VET: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  GROOMER: "bg-amber-100 text-amber-800 border-amber-200",
+  ADMIN: "bg-violet-100 dark:bg-violet-950/50 text-violet-800 dark:text-violet-200 border-violet-200 dark:border-violet-900",
+  STAFF: "bg-teal-100 dark:bg-teal-950/50 text-teal-800 dark:text-teal-200 border-teal-200 dark:border-teal-900",
+  VET: "bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-900",
+  GROOMER: "bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-200 border-amber-200 dark:border-amber-900",
   CUSTOMER: "bg-primary/10 text-primary border-primary/20",
 };
 
@@ -296,7 +298,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 shrink-0 text-muted-foreground hover:text-rose-600"
+              className="h-9 w-9 shrink-0 text-muted-foreground hover:text-rose-600 dark:text-rose-300"
               onClick={handleLogout}
               aria-label="Log out"
             >
@@ -351,7 +353,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     item={{ view: "logout", label: "Log out", icon: LogOut }}
                     active={false}
                     onSelect={handleLogout}
-                    className="text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                    className="text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:bg-rose-950/40 hover:text-rose-700 dark:text-rose-200"
                   />
                 </nav>
               </SheetContent>
@@ -360,6 +362,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <h1 className="min-w-0 flex-1 truncate text-base font-semibold tracking-tight md:text-lg">
               {viewTitle(view, role)}
             </h1>
+
+            <ThemeToggle />
 
             {/* Bell */}
             {isCustomer ? (
@@ -371,7 +375,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <div className="flex items-center justify-between border-b px-3 py-2">
                     <p className="text-sm font-semibold">Notifications</p>
                     {unread > 0 ? (
-                      <Badge variant="outline" className="border-rose-200 bg-rose-100 text-rose-700">
+                      <Badge variant="outline" className="border-rose-200 dark:border-rose-900 bg-rose-100 dark:bg-rose-950/50 text-rose-700 dark:text-rose-200">
                         {unread} unread
                       </Badge>
                     ) : null}
@@ -431,7 +435,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   Profile
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onSelect={handleLogout} className="text-rose-600 focus:text-rose-700">
+                <DropdownMenuItem onSelect={handleLogout} className="text-rose-600 dark:text-rose-300 focus:text-rose-700 dark:text-rose-200">
                   <LogOut className="size-4" />
                   Log out
                 </DropdownMenuItem>
@@ -444,17 +448,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main className="mx-auto w-full max-w-7xl flex-1 p-4 md:p-6">{children}</main>
 
         {/* Sticky footer */}
-        <footer className="mt-auto border-t bg-muted/40">
-          <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-2 px-4 py-3 text-xs text-muted-foreground md:px-6">
-            <p>🐾 PawCare Pet Clinic — Caring for your companions since 2020</p>
-            {clinicPhone ? (
+        <SiteFooter
+          className="mt-auto"
+          note={
+            clinicPhone ? (
               <p className="flex items-center gap-1.5">
                 <Phone className="size-3" />
                 {clinicPhone}
               </p>
-            ) : null}
-          </div>
-        </footer>
+            ) : null
+          }
+        />
       </div>
 
       {/* Admin profile dialog (no admin-profile view in the registry) */}

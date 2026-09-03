@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CircleCheck, Info, Receipt, RefreshCcwDot, ReceiptText } from "lucide-react";
+import { CircleCheck, HandCoins, Info, Loader2, Receipt, ReceiptText, RefreshCcwDot } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -26,12 +26,16 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { Button } from "@/components/ui/button";
 import { apiFetch } from "@/lib/api";
+import { ListNotice } from "@/components/shared/list-notice";
 import { PAYMENT_METHODS } from "@/lib/constants";
 import { formatBDT, formatDate, formatTime, timeAgo } from "@/lib/formatters";
-import type { PaymentDTO } from "@/lib/types";
+import type { PageMeta, PaymentDTO } from "@/lib/types";
 
-const STATUS_OPTIONS = ["UNPAID", "PAID", "REFUNDED"];
+// Payment records are PENDING (cash awaiting collection), PAID or REFUNDED.
+// "UNPAID" was never a payment-record status, so that filter matched nothing.
+const STATUS_OPTIONS = ["PENDING", "PAID", "REFUNDED"];
 const METHOD_OPTIONS = ["CASH", "CARD", "MOBILE"];
 
 function todayStr(): string {
@@ -53,10 +57,29 @@ export function StaffPaymentsView() {
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [methodFilter, setMethodFilter] = useState<string>("ALL");
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
+  const [collectingId, setCollectingId] = useState<string | null>(null);
+
+  // The only path that turns a cash intent into revenue.
+  async function collectCash(p: PaymentDTO) {
+    setCollectingId(p.id);
+    try {
+      await apiFetch<{ payment: PaymentDTO }>(`/api/payments/${p.id}/collect`, { method: "PATCH" });
+      toast.success(`Collected ${formatBDT(p.amount)} from ${p.customer.name}`);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not record the collection");
+    } finally {
+      setCollectingId(null);
+    }
+  }
+
   const load = useCallback(async () => {
     try {
-      const res = await apiFetch<{ payments: PaymentDTO[] }>("/api/payments");
+      const res = await apiFetch<{ payments: PaymentDTO[]; page?: PageMeta }>("/api/payments");
       setPayments(res.payments);
+      setPage(res.page ?? null);
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -97,6 +120,7 @@ export function StaffPaymentsView() {
         title="Payments"
         description="Every invoice at the clinic — collections, refunds and transaction references."
       />
+      <ListNotice page={page} noun="payments" />
 
       {/* Stats */}
       <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
@@ -208,6 +232,7 @@ export function StaffPaymentsView() {
                   <TableHead>Method</TableHead>
                   <TableHead>Transaction</TableHead>
                   <TableHead className="text-right">Status</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -243,6 +268,23 @@ export function StaffPaymentsView() {
                     </TableCell>
                     <TableCell className="text-right">
                       <StatusBadge status={p.status} />
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {p.status === "PENDING" ? (
+                        <Button
+                          size="sm"
+                          className="min-h-9 whitespace-nowrap"
+                          disabled={collectingId === p.id}
+                          onClick={() => void collectCash(p)}
+                        >
+                          {collectingId === p.id ? (
+                            <Loader2 className="size-4 animate-spin" />
+                          ) : (
+                            <HandCoins className="size-4" />
+                          )}
+                          Mark received
+                        </Button>
+                      ) : null}
                     </TableCell>
                   </TableRow>
                 ))}

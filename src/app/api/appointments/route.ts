@@ -6,10 +6,16 @@ import {
   DATE_RE,
   TIME_RE,
   asString,
-  assertSlotFree,
+  assertBookable,
+  assertNoOverlap,
+  getSetting,
   notify,
   notifyRoles,
+  pageMeta,
+  providerRoleForCategory,
   readBody,
+  readPage,
+  serializableWrite,
   shapeAppointment,
 } from "@/app/api/_lib/shape";
 
@@ -43,19 +49,31 @@ export async function GET(req: Request) {
     const q = url.searchParams.get("q");
     if (q) {
       where.OR = [
-        { pet: { name: { contains: q } } },
-        { service: { name: { contains: q } } },
-        { customer: { OR: [{ name: { contains: q } }, { email: { contains: q } }] } },
-        { provider: { name: { contains: q } } },
+        { pet: { name: { contains: q, mode: "insensitive" } } },
+        { service: { name: { contains: q, mode: "insensitive" } } },
+        {
+          customer: {
+            OR: [
+              { name: { contains: q, mode: "insensitive" } },
+              { email: { contains: q, mode: "insensitive" } },
+            ],
+          },
+        },
+        { provider: { name: { contains: q, mode: "insensitive" } } },
       ];
     }
 
-    const appointments = await db.appointment.findMany({
-      where,
-      include: APPOINTMENT_INCLUDE,
-      orderBy: [{ date: "desc" }, { time: "desc" }],
-    });
-    return json({ appointments: appointments.map(shapeAppointment) });
+    const page = readPage(url);
+    const [appointments, total] = await Promise.all([
+      db.appointment.findMany({
+        where,
+        include: APPOINTMENT_INCLUDE,
+        orderBy: [{ date: "desc" }, { time: "desc" }],
+        ...page,
+      }),
+      db.appointment.count({ where }),
+    ]);
+    return json({ appointments: appointments.map(shapeAppointment), page: pageMeta(total, page) });
   } catch (e) {
     return handleError(e);
   }
@@ -93,22 +111,40 @@ export async function POST(req: Request) {
     if (!provider || !provider.active || (provider.role !== "VET" && provider.role !== "GROOMER")) {
       throw new ApiError("Provider not found or unavailable.", 400);
     }
+    // The booking UI only offers matching providers, but the API accepted any of
+    // them - a grooming session could be booked with a vet, or vice versa.
+    const requiredRole = providerRoleForCategory(service.category);
+    if (provider.role !== requiredRole) {
+      throw new ApiError(
+        `${service.name} is a ${service.category.toLowerCase()} service and must be booked with a ${
+          requiredRole === "GROOMER" ? "groomer" : "vet"
+        }.`,
+        400,
+      );
+    }
 
-    await assertSlotFree(providerId, date, time);
+    // Past dates, out-of-hours times and off-grid times are rejected here, not just in the UI.
+    const setting = await getSetting();
+    assertBookable(date, time, service.duration, setting);
 
-    const appointment = await db.appointment.create({
-      data: {
-        customerId: pet.ownerId,
-        petId,
-        serviceId,
-        providerId,
-        date,
-        time,
-        status: "PENDING",
-        paymentStatus: "UNPAID",
-        price: service.price,
-        notes: notes ?? null,
-      },
+    // Serializable isolation closes the check-then-write race: two concurrent bookings
+    // for overlapping windows can no longer both pass the conflict check.
+    const appointment = await serializableWrite(async (tx) => {
+      await assertNoOverlap(tx, providerId, date, time, service.duration);
+      return tx.appointment.create({
+        data: {
+          customerId: pet.ownerId,
+          petId,
+          serviceId,
+          providerId,
+          date,
+          time,
+          status: "PENDING",
+          paymentStatus: "UNPAID",
+          price: service.price,
+          notes: notes ?? null,
+        },
+      });
     });
 
     const when = `${date} at ${time}`;

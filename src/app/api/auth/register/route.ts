@@ -2,9 +2,12 @@ import { db } from "@/lib/db";
 import { ApiError, handleError, json, publicUser } from "@/lib/auth";
 import { hashPassword } from "@/lib/password";
 import { EMAIL_RE, asString, readBody } from "@/app/api/_lib/shape";
+import { HOUR, clientIp, enforce } from "@/lib/rate-limit";
 
 export async function POST(req: Request) {
   try {
+    enforce(`register:ip:${clientIp(req)}`, 5, HOUR, "Too many accounts created from this device.");
+
     const body = await readBody(req);
     const name = asString(body.name);
     const email = asString(body.email)?.toLowerCase();

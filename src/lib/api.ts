@@ -11,6 +11,7 @@ interface ApiFetchOptions {
  * - Adds `Authorization: Bearer <token>` from the persisted zustand store.
  * - JSON-stringifies `body` when provided.
  * - Throws `Error(data.error || "Request failed")` on !ok responses.
+ * - Clears the persisted session on a 401 so a dead token cannot loop forever.
  */
 export async function apiFetch<T>(path: string, options?: ApiFetchOptions): Promise<T> {
   const token = useAppStore.getState().token;
@@ -34,6 +35,15 @@ export async function apiFetch<T>(path: string, options?: ApiFetchOptions): Prom
 
   if (!res.ok) {
     const err = (data ?? {}) as { error?: string };
+
+    // A 401 while we were holding a token means the session is gone (account
+    // deactivated, database reseeded, access revoked). Without this the persisted
+    // store keeps the user "logged in" and every view just toasts errors forever.
+    if (res.status === 401 && token) {
+      useAppStore.getState().logout();
+      throw new Error(err.error || "Your session has expired. Please log in again.");
+    }
+
     throw new Error(err.error || "Request failed");
   }
 

@@ -15,6 +15,12 @@ export async function PATCH(req: Request, ctx: Ctx) {
     if (payment.status === "REFUNDED") {
       throw new ApiError("This payment has already been refunded.", 400);
     }
+    if (payment.status === "PENDING") {
+      throw new ApiError(
+        "This cash payment has not been collected yet, so there is nothing to refund. Cancel it instead.",
+        400,
+      );
+    }
 
     await db.$transaction([
       db.payment.update({ where: { id }, data: { status: "REFUNDED" } }),

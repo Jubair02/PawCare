@@ -18,8 +18,9 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { apiFetch } from "@/lib/api";
+import { ListNotice } from "@/components/shared/list-notice";
 import { formatDateShort, formatTime, initials, petEmoji, timeAgo } from "@/lib/formatters";
-import type { AppointmentDTO, PetDTO, UserDTO } from "@/lib/types";
+import type { AppointmentDTO, PageMeta, PetDTO, UserDTO } from "@/lib/types";
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : "Something went wrong";
@@ -41,12 +42,15 @@ export function StaffCustomersView() {
     return () => clearTimeout(t);
   }, [q]);
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   const load = useCallback(async () => {
     try {
       const params = new URLSearchParams({ role: "CUSTOMER" });
       if (debouncedQ) params.set("q", debouncedQ);
-      const res = await apiFetch<{ users: UserDTO[] }>(`/api/users?${params.toString()}`);
+      const res = await apiFetch<{ users: UserDTO[]; page?: PageMeta }>(`/api/users?${params.toString()}`);
       setUsers(res.users);
+      setPage(res.page ?? null);
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -104,6 +108,7 @@ export function StaffCustomersView() {
             className="pl-9"
             aria-label="Search customers"
           />
+      <ListNotice page={page} noun="customers" />
         </div>
       </SectionHeader>
 

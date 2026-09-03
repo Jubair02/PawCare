@@ -34,9 +34,10 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { apiFetch } from "@/lib/api";
+import { ListNotice } from "@/components/shared/list-notice";
 import { PET_TYPES } from "@/lib/constants";
 import { formatDate, petEmoji } from "@/lib/formatters";
-import type { PetDTO } from "@/lib/types";
+import type { PageMeta, PetDTO } from "@/lib/types";
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : "Something went wrong";
@@ -79,10 +80,13 @@ export function StaffPetsView() {
   const [typeFilter, setTypeFilter] = useState<string>("ALL");
   const [selected, setSelected] = useState<PetDTO | null>(null);
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   const load = useCallback(async () => {
     try {
-      const res = await apiFetch<{ pets: PetDTO[] }>("/api/pets");
+      const res = await apiFetch<{ pets: PetDTO[]; page?: PageMeta }>("/api/pets");
       setPets(res.pets);
+      setPage(res.page ?? null);
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -137,6 +141,7 @@ export function StaffPetsView() {
             className="pl-9"
             aria-label="Search pets"
           />
+      <ListNotice page={page} noun="pets" />
         </div>
       </SectionHeader>
 

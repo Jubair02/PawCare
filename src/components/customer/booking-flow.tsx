@@ -80,7 +80,7 @@ function Stars({ value, count }: { value: number | null | undefined; count?: num
 function StepHint({ show, children }: { show: boolean; children: React.ReactNode }) {
   if (!show) return null;
   return (
-    <p className="flex items-center justify-end gap-1 text-xs text-amber-600">
+    <p className="flex items-center justify-end gap-1 text-xs text-amber-600 dark:text-amber-300">
       <CircleAlert className="size-3.5" /> {children}
     </p>
   );
@@ -311,6 +311,8 @@ function InlineAddPetDialog({
                 <img
                   src={form.photo}
                   alt="Pet preview"
+                  loading="lazy"
+                  decoding="async"
                   className="h-14 w-14 rounded-xl border object-cover"
                 />
               ) : (
@@ -371,7 +373,12 @@ function PaymentDialog({
         method: "POST",
         body: { appointmentId: appointment.id, method },
       });
-      toast.success("Payment successful 🎉");
+      // Cash is settled at the counter, so do not claim it was received.
+      if (method === "CASH") {
+        toast.success(`Reserved — pay ${formatBDT(appointment.price)} at the front desk`);
+      } else {
+        toast.success("Payment successful 🎉");
+      }
       onOpenChange(false);
       onDone();
     } catch (err) {
@@ -405,13 +412,21 @@ function PaymentDialog({
             </Label>
           ))}
         </RadioGroup>
+        {method === "CASH" ? (
+          <p className="rounded-xl border border-orange-200 dark:border-orange-900 bg-orange-50 dark:bg-orange-950/40 px-3 py-2 text-xs text-orange-900 dark:text-orange-200">
+            Nothing is charged now. We will hold your appointment and you pay{" "}
+            {appointment ? formatBDT(appointment.price) : ""} in cash at the front desk.
+          </p>
+        ) : null}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={paying} className="min-h-11">
             Cancel
           </Button>
           <Button onClick={handlePay} disabled={paying} className="min-h-11">
             {paying ? <Loader2 className="animate-spin" /> : <BadgeCheck />}
-            Pay {appointment ? formatBDT(appointment.price) : ""}
+            {method === "CASH"
+              ? "Reserve — pay at clinic"
+              : `Pay ${appointment ? formatBDT(appointment.price) : ""}`}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -471,11 +486,14 @@ export function BookingFlow() {
       .catch((err: Error) => toast.error(err.message));
   }, [step, selectedService]);
 
-  const fetchSlots = useCallback(async (pid: string, d: string) => {
+  // serviceId lets the API hide slots that cannot fit this service before closing time.
+  const fetchSlots = useCallback(async (pid: string, d: string, sid: string) => {
     setSlotsLoading(true);
     try {
       const r = await apiFetch<{ slots: string[] }>(
-        `/api/appointments/slots?providerId=${encodeURIComponent(pid)}&date=${encodeURIComponent(d)}`
+        `/api/appointments/slots?providerId=${encodeURIComponent(pid)}&date=${encodeURIComponent(
+          d
+        )}&serviceId=${encodeURIComponent(sid)}`
       );
       setSlots(r.slots);
     } catch (err) {
@@ -487,11 +505,11 @@ export function BookingFlow() {
   }, []);
 
   useEffect(() => {
-    if (step !== 4 || !providerId || !date) return;
+    if (step !== 4 || !providerId || !date || !serviceId) return;
     setTime(null);
     setSlots(null);
-    fetchSlots(providerId, date);
-  }, [step, providerId, date, fetchSlots]);
+    fetchSlots(providerId, date, serviceId);
+  }, [step, providerId, date, serviceId, fetchSlots]);
 
   const stepValid =
     (step === 1 && !!serviceId) ||
@@ -742,6 +760,8 @@ export function BookingFlow() {
                         <img
                           src={pet.photo}
                           alt={pet.name}
+                          loading="lazy"
+                          decoding="async"
                           className="h-12 w-12 shrink-0 rounded-xl object-cover"
                         />
                       ) : (

@@ -199,6 +199,8 @@ export function VetDashboard() {
                     <img
                       src={a.pet.photo}
                       alt={a.pet.name}
+                      loading="lazy"
+                      decoding="async"
                       className="size-9 shrink-0 rounded-lg object-cover"
                     />
                   ) : (

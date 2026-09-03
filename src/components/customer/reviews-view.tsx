@@ -8,9 +8,10 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api";
+import { ListNotice } from "@/components/shared/list-notice";
 import { formatDate, timeAgo } from "@/lib/formatters";
 import { useAppStore } from "@/lib/store";
-import type { ReviewDTO } from "@/lib/types";
+import type { PageMeta, ReviewDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
@@ -38,11 +39,16 @@ export function CustomerReviewsView() {
   const [reviews, setReviews] = useState<ReviewDTO[] | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   useEffect(() => {
     let alive = true;
-    apiFetch<{ reviews: ReviewDTO[] }>("/api/reviews?mine=true")
+    apiFetch<{ reviews: ReviewDTO[]; page?: PageMeta }>("/api/reviews?mine=true")
       .then((res) => {
-        if (alive) setReviews(res.reviews);
+        if (alive) {
+          setReviews(res.reviews);
+          setPage(res.page ?? null);
+        }
       })
       .catch((err: Error) => {
         if (alive) toast.error(err.message);
@@ -65,6 +71,7 @@ export function CustomerReviewsView() {
           <CalendarPlus /> Review a completed visit
         </Button>
       </SectionHeader>
+      <ListNotice page={page} noun="reviews" />
 
       {loading ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

@@ -48,10 +48,11 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch } from "@/lib/api";
+import { ListNotice } from "@/components/shared/list-notice";
 import { PET_TYPES, VACCINATION_STATUSES } from "@/lib/constants";
 import { formatDate, petEmoji } from "@/lib/formatters";
 import { useAppStore } from "@/lib/store";
-import type { PetDTO } from "@/lib/types";
+import type { PageMeta, PetDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
@@ -344,6 +345,8 @@ function PetFormDialog({
                 <img
                   src={form.photo}
                   alt="Pet preview"
+                  loading="lazy"
+                  decoding="async"
                   className="h-14 w-14 rounded-xl border object-cover"
                 />
               ) : (
@@ -411,7 +414,7 @@ function PetCard({
         <div className="relative h-32 w-full overflow-hidden rounded-t-2xl">
           {pet.photo ? (
              
-            <img src={pet.photo} alt={pet.name} className="h-full w-full object-cover" />
+            <img src={pet.photo} alt={pet.name} loading="lazy" decoding="async" className="h-full w-full object-cover" />
           ) : (
             <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-emerald-600 to-teal-500 text-5xl">
               {petEmoji(pet.type)}
@@ -491,11 +494,14 @@ export function PetsView() {
   const [deleting, setDeleting] = useState<PetDTO | null>(null);
   const [deletePending, setDeletePending] = useState(false);
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   async function loadPets() {
     setLoading(true);
     try {
-      const res = await apiFetch<{ pets: PetDTO[] }>("/api/pets");
+      const res = await apiFetch<{ pets: PetDTO[]; page?: PageMeta }>("/api/pets");
       setPets(res.pets);
+      setPage(res.page ?? null);
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
@@ -536,6 +542,7 @@ export function PetsView() {
           <Plus /> Add pet
         </Button>
       </SectionHeader>
+      <ListNotice page={page} noun="pets" />
 
       {loading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">

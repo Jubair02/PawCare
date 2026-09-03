@@ -42,10 +42,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { apiFetch } from "@/lib/api";
+import { ListNotice } from "@/components/shared/list-notice";
 import { PAYMENT_METHODS } from "@/lib/constants";
 import { dateRelation, formatBDT, formatDate, formatTime, petEmoji } from "@/lib/formatters";
 import { useAppStore } from "@/lib/store";
-import type { AppointmentDTO } from "@/lib/types";
+import type { AppointmentDTO, PageMeta } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
@@ -100,7 +101,12 @@ function PayDialog({
         method: "POST",
         body: { appointmentId: appointment.id, method },
       });
-      toast.success("Payment successful 🎉");
+      // Cash is settled at the counter, so do not claim it was received.
+      if (method === "CASH") {
+        toast.success(`Reserved — pay ${formatBDT(appointment.price)} at the front desk`);
+      } else {
+        toast.success("Payment successful 🎉");
+      }
       onOpenChange(false);
       onDone();
     } catch (err) {
@@ -136,13 +142,21 @@ function PayDialog({
             </Label>
           ))}
         </RadioGroup>
+        {method === "CASH" ? (
+          <p className="rounded-xl border border-orange-200 dark:border-orange-900 bg-orange-50 dark:bg-orange-950/40 px-3 py-2 text-xs text-orange-900 dark:text-orange-200">
+            Nothing is charged now. We will hold your appointment and you pay{" "}
+            {appointment ? formatBDT(appointment.price) : ""} in cash at the front desk.
+          </p>
+        ) : null}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={paying} className="min-h-11">
             Cancel
           </Button>
           <Button onClick={handlePay} disabled={paying} className="min-h-11">
             {paying ? <Loader2 className="animate-spin" /> : <BadgeCheck />}
-            Pay {appointment ? formatBDT(appointment.price) : ""}
+            {method === "CASH"
+              ? "Reserve — pay at clinic"
+              : `Pay ${appointment ? formatBDT(appointment.price) : ""}`}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -496,7 +510,7 @@ function DetailsDialog({
               <p className="flex items-center gap-2">
                 <span className="text-muted-foreground">Treatment record:</span>
                 {a.treatment ? (
-                  <span className="font-medium text-emerald-700">Available</span>
+                  <span className="font-medium text-emerald-700 dark:text-emerald-200">Available</span>
                 ) : (
                   <span className="italic text-muted-foreground">Not added yet</span>
                 )}
@@ -504,7 +518,7 @@ function DetailsDialog({
               <p className="flex items-center gap-2">
                 <span className="text-muted-foreground">Your review:</span>
                 {a.review ? (
-                  <span className="flex items-center gap-1 font-medium text-amber-600">
+                  <span className="flex items-center gap-1 font-medium text-amber-600 dark:text-amber-300">
                     <Star className="size-3.5 fill-amber-400 text-amber-400" />
                     {a.review.rating}/5
                   </span>
@@ -654,11 +668,14 @@ export function CustomerAppointmentsView() {
   const [reviewTarget, setReviewTarget] = useState<AppointmentDTO | null>(null);
   const [detailsTarget, setDetailsTarget] = useState<AppointmentDTO | null>(null);
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   const loadAppointments = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiFetch<{ appointments: AppointmentDTO[] }>("/api/appointments");
+      const res = await apiFetch<{ appointments: AppointmentDTO[]; page?: PageMeta }>("/api/appointments");
       setAppointments(res.appointments);
+      setPage(res.page ?? null);
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
@@ -723,6 +740,7 @@ export function CustomerAppointmentsView() {
       <SectionHeader title="My Appointments" description="Track, pay, reschedule and review your visits">
         {bookCta}
       </SectionHeader>
+      <ListNotice page={page} noun="appointments" />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
         <TabsList className="h-auto w-full flex-wrap justify-start sm:w-auto">

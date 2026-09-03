@@ -20,10 +20,11 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { apiFetch } from "@/lib/api";
+import { ListNotice } from "@/components/shared/list-notice";
 import { PET_TYPES } from "@/lib/constants";
 import { formatDate, petEmoji } from "@/lib/formatters";
 import { useAppStore } from "@/lib/store";
-import type { PetDTO, TreatmentDTO } from "@/lib/types";
+import type { PageMeta, PetDTO, TreatmentDTO } from "@/lib/types";
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : "Something went wrong";
@@ -70,10 +71,13 @@ export function VetPatientsView() {
 
   const isVet = user?.role === "VET";
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   const load = useCallback(async () => {
     try {
-      const res = await apiFetch<{ pets: PetDTO[] }>("/api/pets");
+      const res = await apiFetch<{ pets: PetDTO[]; page?: PageMeta }>("/api/pets");
       setPets(res.pets);
+      setPage(res.page ?? null);
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -136,6 +140,7 @@ export function VetPatientsView() {
             className="pl-9"
             aria-label="Search patients"
           />
+      <ListNotice page={page} noun="patients" />
         </div>
       </SectionHeader>
 
@@ -182,6 +187,8 @@ export function VetPatientsView() {
                     <img
                       src={p.photo}
                       alt={p.name}
+                      loading="lazy"
+                      decoding="async"
                       className="size-14 shrink-0 rounded-xl object-cover"
                     />
                   ) : (

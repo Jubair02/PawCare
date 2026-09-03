@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Ban,
   CalendarDays,
+  CircleAlert,
   CircleCheck,
   ClipboardList,
   Eye,
@@ -43,9 +44,10 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { apiFetch } from "@/lib/api";
+import { ListNotice } from "@/components/shared/list-notice";
 import { formatBDT, formatDate, formatDateShort, formatTime, petEmoji } from "@/lib/formatters";
 import { useAppStore } from "@/lib/store";
-import type { AppointmentDTO } from "@/lib/types";
+import type { AppointmentDTO, PageMeta, PetDetailDTO } from "@/lib/types";
 
 function todayStr(): string {
   const n = new Date();
@@ -97,19 +99,66 @@ function TreatmentDialog({
 }) {
   const [form, setForm] = useState<TreatmentForm>(EMPTY_TREATMENT);
   const [submitting, setSubmitting] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [patient, setPatient] = useState<PetDetailDTO | null>(null);
 
   const set = (k: keyof TreatmentForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((f) => ({ ...f, [k]: e.target.value }));
 
-  async function submit() {
+  // Start clean each time the dialog opens.
+  useEffect(() => {
+    if (open) {
+      setForm(EMPTY_TREATMENT);
+      setConfirmDiscard(false);
+    }
+  }, [open]);
+
+  // The clinician should not have to remember the pet's history from another
+  // screen while writing the record for it.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setPatient(null);
+    apiFetch<{ pet: PetDetailDTO }>(`/api/pets/${appointment.pet.id}`)
+      .then((r) => {
+        if (!cancelled) setPatient(r.pet);
+      })
+      .catch(() => {
+        // Context is a bonus - never block writing the record on it.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, appointment.pet.id]);
+
+  const dirty = Object.values(form).some((v) => v.trim() !== "");
+  // The server requires one of these; mirror it so the button explains itself.
+  const canSave = form.diagnosis.trim() !== "" || form.treatmentPlan.trim() !== "";
+
+  const priorTreatment = patient?.treatments?.find((t) => t.appointment.id !== appointment.id) ?? null;
+
+  /** Closing with unsaved clinical text asks first, instead of silently discarding. */
+  function requestClose(next: boolean) {
+    if (next) {
+      onOpenChange(true);
+      return;
+    }
+    if (dirty && !submitting) {
+      setConfirmDiscard(true);
+      return;
+    }
+    onOpenChange(false);
+  }
+
+  async function submit(complete: boolean) {
     setSubmitting(true);
     try {
-      const body: Record<string, unknown> = { appointmentId: appointment.id };
+      const body: Record<string, unknown> = { appointmentId: appointment.id, complete };
       for (const [k, v] of Object.entries(form)) {
         if (v.trim() !== "") body[k] = v.trim();
       }
       await apiFetch("/api/treatments", { method: "POST", body });
-      toast.success("Treatment record saved");
+      toast.success(complete ? "Record saved — visit completed" : "Treatment record saved");
       onOpenChange(false);
       onSaved();
     } catch (e) {
@@ -120,7 +169,7 @@ function TreatmentDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={requestClose}>
       <DialogContent className="max-h-[90vh] overflow-y-auto scrollbar-thin sm:max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -129,9 +178,36 @@ function TreatmentDialog({
           </DialogTitle>
           <DialogDescription>
             {appointment.service.icon} {appointment.service.name} · {formatDate(appointment.date)} at{" "}
-            {formatTime(appointment.time)}. Saving marks the appointment as completed.
+            {formatTime(appointment.time)}.
           </DialogDescription>
         </DialogHeader>
+
+        {/* Patient context — read-only, so the record is written with the history in view. */}
+        {patient?.medicalNotes || priorTreatment || appointment.notes ? (
+          <div className="grid gap-2 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50/70 p-3 text-xs text-amber-950 dark:text-amber-200">
+            {patient?.medicalNotes ? (
+              <p>
+                <span className="font-semibold">Medical notes: </span>
+                {patient.medicalNotes}
+              </p>
+            ) : null}
+            {appointment.notes ? (
+              <p>
+                <span className="font-semibold">Owner&apos;s note: </span>
+                {appointment.notes}
+              </p>
+            ) : null}
+            {priorTreatment ? (
+              <p>
+                <span className="font-semibold">
+                  Last visit ({formatDate(priorTreatment.appointment.date)}):{" "}
+                </span>
+                {priorTreatment.diagnosis || priorTreatment.treatmentPlan || "no diagnosis recorded"}
+                {priorTreatment.medication ? ` · ${priorTreatment.medication}` : ""}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="grid gap-4">
           <div className="grid gap-2">
@@ -194,16 +270,59 @@ function TreatmentDialog({
           </div>
         </div>
 
-        <div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
+        {!canSave ? (
+          <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-300">
+            <CircleAlert className="size-3.5 shrink-0" />
+            Add a diagnosis or a treatment plan to save this record.
+          </p>
+        ) : null}
+
+        <div className="flex flex-col justify-end gap-2 sm:flex-row">
+          <Button variant="outline" onClick={() => requestClose(false)} disabled={submitting} className="min-h-11 sm:min-h-9">
             Cancel
           </Button>
-          <Button onClick={() => void submit()} disabled={submitting} className="min-h-11 sm:min-h-9">
+          <Button
+            variant="outline"
+            onClick={() => void submit(false)}
+            disabled={submitting || !canSave}
+            className="min-h-11 sm:min-h-9"
+          >
             {submitting ? <Loader2 className="size-4 animate-spin" /> : <ClipboardList className="size-4" />}
             Save record
           </Button>
+          <Button
+            onClick={() => void submit(true)}
+            disabled={submitting || !canSave}
+            className="min-h-11 sm:min-h-9"
+          >
+            <CircleCheck className="size-4" />
+            Save &amp; complete visit
+          </Button>
         </div>
       </DialogContent>
+
+      <AlertDialog open={confirmDiscard} onOpenChange={setConfirmDiscard}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard this record?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved notes for {appointment.pet.name}. Closing now loses them.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-rose-600 hover:bg-rose-700"
+              onClick={() => {
+                setConfirmDiscard(false);
+                onOpenChange(false);
+              }}
+            >
+              Discard
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }
@@ -326,10 +445,13 @@ export function VetAppointmentsView() {
 
   const isVet = user?.role === "VET";
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   const load = useCallback(async () => {
     try {
-      const res = await apiFetch<{ appointments: AppointmentDTO[] }>("/api/appointments");
+      const res = await apiFetch<{ appointments: AppointmentDTO[]; page?: PageMeta }>("/api/appointments");
       setAppointments(res.appointments);
+      setPage(res.page ?? null);
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -428,7 +550,7 @@ export function VetAppointmentsView() {
         <Button
           size={size}
           variant="outline"
-          className="border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+          className="border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:bg-rose-950/40 hover:text-rose-700 dark:text-rose-200"
           disabled={disabled}
           onClick={(e) => {
             e.stopPropagation();
@@ -460,7 +582,7 @@ export function VetAppointmentsView() {
         <Button
           size={size}
           variant="outline"
-          className="border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+          className="border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:bg-rose-950/40 hover:text-rose-700 dark:text-rose-200"
           disabled={disabled}
           onClick={(e) => {
             e.stopPropagation();
@@ -508,7 +630,7 @@ export function VetAppointmentsView() {
         <Button
           size={size}
           variant="outline"
-          className="border-violet-200 text-violet-700 hover:bg-violet-50 hover:text-violet-800"
+          className="border-violet-200 dark:border-violet-900 text-violet-700 dark:text-violet-200 hover:bg-violet-50 dark:bg-violet-950/40 hover:text-violet-800"
           onClick={(e) => {
             e.stopPropagation();
             setTreatmentTarget(a);
@@ -540,6 +662,7 @@ export function VetAppointmentsView() {
             : "Accept requests, run grooming sessions and record notes."
         }
       />
+      <ListNotice page={page} noun="appointments" />
 
       {/* Filters */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">

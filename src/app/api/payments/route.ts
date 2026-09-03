@@ -1,7 +1,8 @@
 import { db } from "@/lib/db";
 import { ApiError, handleError, json, requireRole, requireUser } from "@/lib/auth";
-import type { Prisma } from "@prisma/client";
-import { PAYMENT_INCLUDE, PAYMENT_METHODS, asString, notify, notifyRoles, readBody, shapeAppointment, shapePayment, APPOINTMENT_INCLUDE } from "@/app/api/_lib/shape";
+import type { Payment, Prisma } from "@prisma/client";
+import { PAYMENT_INCLUDE, PAYMENT_METHODS, asString, notify, notifyRoles, pageMeta, readBody, readPage, shapeAppointment, shapePayment, APPOINTMENT_INCLUDE } from "@/app/api/_lib/shape";
+import { isPayNowMethod } from "@/lib/domain";
 
 /** GET /api/payments — role-scoped. ?status=&method= */
 export async function GET(req: Request) {
@@ -22,12 +23,12 @@ export async function GET(req: Request) {
     const method = url.searchParams.get("method");
     if (method) where.method = method;
 
-    const payments = await db.payment.findMany({
-      where,
-      include: PAYMENT_INCLUDE,
-      orderBy: { paidAt: "desc" },
-    });
-    return json({ payments: payments.map(shapePayment) });
+    const page = readPage(url);
+    const [payments, total] = await Promise.all([
+      db.payment.findMany({ where, include: PAYMENT_INCLUDE, orderBy: { paidAt: "desc" }, ...page }),
+      db.payment.count({ where }),
+    ]);
+    return json({ payments: payments.map(shapePayment), page: pageMeta(total, page) });
   } catch (e) {
     return handleError(e);
   }
@@ -57,53 +58,112 @@ export async function POST(req: Request) {
     if (appointment.paymentStatus === "PAID") {
       throw new ApiError("This appointment has already been paid.", 409);
     }
+    if (appointment.paymentStatus === "CASH_DUE") {
+      throw new ApiError("A cash payment is already due for this appointment at the front desk.", 409);
+    }
     if (appointment.status === "CANCELLED") {
       throw new ApiError("Cancelled appointments cannot be paid.", 409);
     }
 
-    // Sequential invoice id: INV-<2000 + payment count>, bumping on rare collisions.
-    let seq = 2001 + (await db.payment.count());
-    let invoiceId = `INV-${seq}`;
-    while (await db.payment.findUnique({ where: { invoiceId }, select: { id: true } })) {
-      seq += 1;
-      invoiceId = `INV-${seq}`;
-    }
+    // Cash is settled in person. Recording it as PAID here would put money in the
+    // revenue figures that nobody has actually handed over, so it is booked as a
+    // PENDING record and only staff can mark it collected.
+    const payNow = isPayNowMethod(method);
     const transactionId = `TXN${Date.now()}${Math.floor(1000 + Math.random() * 9000)}`;
 
-    const payment = await db.payment.create({
-      data: {
-        invoiceId,
-        appointmentId,
-        customerId: appointment.customerId,
-        amount: appointment.price,
-        method,
-        transactionId,
-        status: "PAID",
-      },
-    });
+    // The payment row and the appointment's paymentStatus move together or not at all.
+    // Serializable isolation also stops two concurrent payments double-charging one
+    // appointment; a collision on the sequential invoice id just retries with the next.
+    let payment: Payment | null = null;
+    let lastError: unknown = null;
 
-    await db.appointment.update({
-      where: { id: appointmentId },
-      data: {
-        paymentStatus: "PAID",
-        ...(appointment.status === "PENDING" ? { status: "CONFIRMED" } : {}),
-      },
-    });
+    for (let attempt = 0; attempt < 5 && !payment; attempt++) {
+      try {
+        payment = await db.$transaction(
+          async (tx) => {
+            // Re-read inside the transaction - a concurrent payment may have landed.
+            const fresh = await tx.appointment.findUnique({
+              where: { id: appointmentId },
+              select: { status: true, paymentStatus: true },
+            });
+            if (!fresh) throw new ApiError("Appointment not found.", 404);
+            if (fresh.paymentStatus === "PAID") {
+              throw new ApiError("This appointment has already been paid.", 409);
+            }
+            if (fresh.paymentStatus === "CASH_DUE") {
+              throw new ApiError("A cash payment is already due for this appointment.", 409);
+            }
+            if (fresh.status === "CANCELLED") {
+              throw new ApiError("Cancelled appointments cannot be paid.", 409);
+            }
 
-    await notify(
-      appointment.customerId,
-      "Payment successful",
-      `Your payment of ৳${appointment.price} for ${appointment.service.name} (${appointment.pet.name}) was received. Invoice ${invoiceId}.`,
-      "PAYMENT",
-    );
-    await notifyRoles(
-      ["ADMIN", "STAFF"],
-      "Payment received",
-      `A payment of ৳${appointment.price} was recorded for ${appointment.pet.name}'s ${appointment.service.name}. Invoice ${invoiceId}.`,
-      "PAYMENT",
-    );
+            const invoiceId = `INV-${2001 + (await tx.payment.count()) + attempt}`;
+            const created = await tx.payment.create({
+              data: {
+                invoiceId,
+                appointmentId,
+                customerId: appointment.customerId,
+                amount: appointment.price,
+                method,
+                transactionId,
+                status: payNow ? "PAID" : "PENDING",
+              },
+            });
 
-    const fullPayment = await db.payment.findUnique({ where: { id: payment.id }, include: PAYMENT_INCLUDE });
+            await tx.appointment.update({
+              where: { id: appointmentId },
+              data: {
+                paymentStatus: payNow ? "PAID" : "CASH_DUE",
+                // Only settled money confirms a booking; a cash intent does not.
+                ...(payNow && fresh.status === "PENDING" ? { status: "CONFIRMED" } : {}),
+              },
+            });
+
+            return created;
+          },
+          { isolationLevel: "Serializable" },
+        );
+      } catch (e) {
+        if (e instanceof ApiError) throw e; // a real rejection, not a write conflict
+        lastError = e;
+      }
+    }
+
+    if (!payment) {
+      if (lastError) throw lastError;
+      throw new ApiError("Payment could not be completed. Please try again.", 500);
+    }
+
+    if (payNow) {
+      await notify(
+        appointment.customerId,
+        "Payment successful",
+        `Your payment of ৳${appointment.price} for ${appointment.service.name} (${appointment.pet.name}) was received. Invoice ${payment.invoiceId}.`,
+        "PAYMENT",
+      );
+      await notifyRoles(
+        ["ADMIN", "STAFF"],
+        "Payment received",
+        `A payment of ৳${appointment.price} was recorded for ${appointment.pet.name}'s ${appointment.service.name}. Invoice ${payment.invoiceId}.`,
+        "PAYMENT",
+      );
+    } else {
+      await notify(
+        appointment.customerId,
+        "Cash payment due at the clinic",
+        `Please pay ৳${appointment.price} for ${appointment.service.name} (${appointment.pet.name}) at the front desk. Invoice ${payment.invoiceId}.`,
+        "PAYMENT",
+      );
+      await notifyRoles(
+        ["ADMIN", "STAFF"],
+        "Cash payment expected",
+        `${appointment.customer.name} will pay ৳${appointment.price} in cash for ${appointment.pet.name}'s ${appointment.service.name}. Invoice ${payment.invoiceId} is awaiting collection.`,
+        "PAYMENT",
+      );
+    }
+
+    const paymentId = payment.id;
+    const fullPayment = await db.payment.findUnique({ where: { id: paymentId }, include: PAYMENT_INCLUDE });
     const fullAppointment = await db.appointment.findUnique({ where: { id: appointmentId }, include: APPOINTMENT_INCLUDE });
     if (!fullPayment || !fullAppointment) throw new ApiError("Payment could not be loaded.", 500);
     return json({ payment: shapePayment(fullPayment), appointment: shapeAppointment(fullAppointment) }, 201);

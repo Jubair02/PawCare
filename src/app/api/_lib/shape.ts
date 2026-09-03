@@ -5,29 +5,38 @@
  */
 import { db } from "@/lib/db";
 import { ApiError } from "@/lib/auth";
-import type { Pet, Prisma, Service, User } from "@prisma/client";
+import {
+  ACTIVE_APPOINTMENT_STATUSES as DOMAIN_ACTIVE_STATUSES,
+  ALL_STATUSES as DOMAIN_ALL_STATUSES,
+  PAYMENT_METHOD_VALUES,
+  PET_GENDER_VALUES,
+  PET_TYPE_VALUES,
+  REVIEW_STATUSES as DOMAIN_REVIEW_STATUSES,
+  ROLES as DOMAIN_ROLES,
+  SERVICE_CATEGORY_VALUES,
+  VACCINATION_STATUS_VALUES,
+} from "@/lib/domain";
+import type { Pet, Prisma, Service, Setting, User } from "@prisma/client";
+
+/** Prisma client or an interactive-transaction client - lets helpers run inside `$transaction`. */
+export type DbClient = typeof db | Prisma.TransactionClient;
 
 /* ---------------------------------- consts --------------------------------- */
 
-export const ROLES = ["ADMIN", "STAFF", "VET", "GROOMER", "CUSTOMER"];
-export const PET_TYPES = ["DOG", "CAT", "BIRD", "OTHER"];
-export const PET_GENDERS = ["MALE", "FEMALE"];
-export const VACCINATION_STATUSES = ["UP_TO_DATE", "PARTIAL", "NONE"];
-export const SERVICE_CATEGORIES = ["MEDICAL", "GROOMING", "DIAGNOSTIC"];
-export const PAYMENT_METHODS = ["CASH", "CARD", "MOBILE"];
-export const REVIEW_STATUSES = ["PENDING", "APPROVED", "HIDDEN"];
-export const ALL_STATUSES = ["PENDING", "CONFIRMED", "CHECKED_IN", "IN_PROGRESS", "COMPLETED", "CANCELLED"];
-export const ACTIVE_APPOINTMENT_STATUSES = ["PENDING", "CONFIRMED", "CHECKED_IN", "IN_PROGRESS"];
+// The domain vocabulary lives in one place now (src/lib/domain.ts) so the API
+// and the UI cannot drift apart. Re-exported here as mutable string arrays so
+// existing `.includes(...)` checks in the routes keep working unchanged.
+export const ROLES: string[] = [...DOMAIN_ROLES];
+export const PET_TYPES: string[] = [...PET_TYPE_VALUES];
+export const PET_GENDERS: string[] = [...PET_GENDER_VALUES];
+export const VACCINATION_STATUSES: string[] = [...VACCINATION_STATUS_VALUES];
+export const SERVICE_CATEGORIES: string[] = [...SERVICE_CATEGORY_VALUES];
+export const PAYMENT_METHODS: string[] = [...PAYMENT_METHOD_VALUES];
+export const REVIEW_STATUSES: string[] = [...DOMAIN_REVIEW_STATUSES];
+export const ALL_STATUSES: string[] = [...DOMAIN_ALL_STATUSES];
+export const ACTIVE_APPOINTMENT_STATUSES: string[] = [...DOMAIN_ACTIVE_STATUSES];
 
-/** Server-enforced appointment status transition rules. */
-export const TRANSITIONS: Record<string, string[]> = {
-  PENDING: ["CONFIRMED", "CANCELLED"],
-  CONFIRMED: ["CHECKED_IN", "CANCELLED"],
-  CHECKED_IN: ["IN_PROGRESS", "CANCELLED"],
-  IN_PROGRESS: ["COMPLETED"],
-  COMPLETED: [],
-  CANCELLED: [],
-};
+export { allowedTransitions, providerRoleForCategory, TRANSITIONS } from "@/lib/domain";
 
 export const EMAIL_RE = /^\S+@\S+\.\S+$/;
 export const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -37,7 +46,45 @@ const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "S
 
 /* ------------------------------ body & params ------------------------------ */
 
+/** Hard ceiling on a JSON request body, so a huge payload cannot be buffered. */
+export const MAX_BODY_BYTES = 1_000_000;
+
+/** Pet photos are stored inline in a text column, so their size is capped. */
+export const MAX_PHOTO_BYTES = 400 * 1024;
+
+const DATA_URI_RE = /^data:image\/(png|jpe?g|webp|gif|avif);base64,/i;
+const HTTP_URL_RE = /^https?:\/\//i;
+
+/**
+ * Validates a pet photo. The client caps uploads at 400KB but that is only a
+ * courtesy - without this the API accepted an unbounded base64 string straight
+ * into the database.
+ */
+export function assertValidPhoto(photo: string) {
+  if (photo === "") return;
+
+  const isDataUri = DATA_URI_RE.test(photo);
+  const isHttp = HTTP_URL_RE.test(photo);
+  if (!isDataUri && !isHttp) {
+    throw new ApiError("Photo must be a base64 image data URI or an http(s) URL.", 400);
+  }
+  if (isHttp) {
+    if (photo.length > 2048) throw new ApiError("Photo URL is too long.", 400);
+    return;
+  }
+
+  // base64 encodes 3 bytes per 4 characters.
+  const payload = photo.length - photo.indexOf(",") - 1;
+  if (Math.floor((payload * 3) / 4) > MAX_PHOTO_BYTES) {
+    throw new ApiError("Pet photo must be under 400KB.", 400);
+  }
+}
+
 export async function readBody(req: Request): Promise<Record<string, unknown>> {
+  const declared = Number(req.headers.get("content-length") ?? 0);
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+    throw new ApiError("Request body is too large.", 413);
+  }
   try {
     const parsed: unknown = await req.json();
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
@@ -63,8 +110,78 @@ export function asBoolean(v: unknown): boolean | undefined {
   return undefined;
 }
 
+/**
+ * The clinic's wall-clock timezone. Every "today", "now" and month bucket in the
+ * API derives from this, so UTC and local-time servers agree on which day it is.
+ */
+export const CLINIC_TZ = process.env.CLINIC_TIMEZONE || "Asia/Dhaka";
+
+const CLINIC_PARTS = new Intl.DateTimeFormat("en-CA", {
+  timeZone: CLINIC_TZ,
+  hourCycle: "h23",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+});
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+function clinicParts(d: Date) {
+  const parts = CLINIC_PARTS.formatToParts(d);
+  const get = (type: string) => Number(parts.find((x) => x.type === type)?.value ?? 0);
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour"),
+    minute: get("minute"),
+    second: get("second"),
+  };
+}
+
+/** Milliseconds the clinic timezone is ahead of UTC at that instant (DST-aware). */
+function clinicOffsetMs(d: Date): number {
+  const p = clinicParts(d);
+  const asUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  return asUtc - Math.floor(d.getTime() / 1000) * 1000;
+}
+
+/** UTC instant of clinic-local midnight for a y/m/d, refined once for DST edges. */
+function clinicMidnightUtc(year: number, month: number, day: number): Date {
+  const guess = Date.UTC(year, month - 1, day);
+  let ms = guess - clinicOffsetMs(new Date(guess));
+  ms = guess - clinicOffsetMs(new Date(ms));
+  return new Date(ms);
+}
+
+/** Half-open [start, end) UTC instants covering one clinic-local calendar day. */
+export function clinicDayBoundsUtc(date: string): { start: Date; end: Date } {
+  const [y, m, d] = date.split("-").map(Number);
+  const start = clinicMidnightUtc(y, m, d);
+  const next = new Date(Date.UTC(y, m - 1, d + 1)); // Date.UTC normalises overflow
+  const end = clinicMidnightUtc(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate());
+  return { start, end };
+}
+
+/** Today's date in the clinic timezone as `yyyy-MM-dd`. */
 export function todayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+  const p = clinicParts(new Date());
+  return `${p.year}-${pad2(p.month)}-${pad2(p.day)}`;
+}
+
+/** Minutes since clinic-local midnight, right now. */
+export function clinicNowMinutes(): number {
+  const p = clinicParts(new Date());
+  return p.hour * 60 + p.minute;
+}
+
+/** `yyyy-MM` bucket key for an instant, in the clinic timezone. */
+export function clinicMonthKey(d: Date): string {
+  const p = clinicParts(d);
+  return `${p.year}-${pad2(p.month)}`;
 }
 
 export function timeToMinutes(t: string): number {
@@ -78,16 +195,55 @@ export function minutesToTime(m: number): string {
 
 /** Last 6 months (including current) as `{ key: "2025-06", label: "Jun" }`, chronological. */
 export function last6Months(): { key: string; label: string }[] {
-  const now = new Date();
+  const p = clinicParts(new Date());
   const out: { key: string; label: string }[] = [];
   for (let i = 5; i >= 0; i--) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const d = new Date(Date.UTC(p.year, p.month - 1 - i, 1));
     out.push({
-      key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`,
-      label: MONTHS_SHORT[d.getMonth()],
+      key: `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}`,
+      label: MONTHS_SHORT[d.getUTCMonth()],
     });
   }
   return out;
+}
+
+/* -------------------------------- paging ----------------------------------- */
+
+/**
+ * List endpoints are bounded. Without this every `findMany` returned the whole
+ * table, so payload and query cost grew without limit as the clinic filled up.
+ */
+export const DEFAULT_PAGE_SIZE = 200;
+export const MAX_PAGE_SIZE = 500;
+
+export interface PageParams {
+  take: number;
+  skip: number;
+}
+
+/** Reads `?limit=&offset=`, clamped to [1, MAX_PAGE_SIZE] and >= 0. */
+export function readPage(url: URL): PageParams {
+  const limit = asNumber(url.searchParams.get("limit"));
+  const offset = asNumber(url.searchParams.get("offset"));
+  return {
+    take:
+      limit === undefined
+        ? DEFAULT_PAGE_SIZE
+        : Math.min(Math.max(Math.trunc(limit), 1), MAX_PAGE_SIZE),
+    skip: offset === undefined ? 0 : Math.max(Math.trunc(offset), 0),
+  };
+}
+
+export interface PageMeta {
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+/** Metadata so a client can tell it is looking at a subset, and ask for the rest. */
+export function pageMeta(total: number, { take, skip }: PageParams): PageMeta {
+  return { total, limit: take, offset: skip, hasMore: skip + take < total };
 }
 
 /* -------------------------------- includes --------------------------------- */
@@ -308,17 +464,98 @@ export async function notifyRoles(roles: string[], title: string, message: strin
   });
 }
 
-/** 409 when the provider already has a non-CANCELLED booking at that date/time. */
-export async function assertSlotFree(providerId: string, date: string, time: string, excludeId?: string) {
-  const clash = await db.appointment.findFirst({
+/**
+ * Runs `fn` in a Serializable transaction, retrying the write conflicts Postgres
+ * raises (P2034 / 40001) when concurrent transactions touch overlapping rows.
+ * An `ApiError` is a deliberate rejection - it is rethrown, never retried.
+ */
+export async function serializableWrite<T>(
+  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  attempts = 4,
+): Promise<T> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await db.$transaction(fn, { isolationLevel: "Serializable" });
+    } catch (e) {
+      if (e instanceof ApiError) throw e;
+      lastError = e;
+    }
+  }
+  throw lastError;
+}
+
+/** The minute window `[start, end)` an appointment of `duration` occupies. */
+export function slotWindow(time: string, duration: number): { start: number; end: number } {
+  const start = timeToMinutes(time);
+  return { start, end: start + Math.max(duration, 1) };
+}
+
+/**
+ * 409 when the requested window overlaps any non-CANCELLED booking for the provider.
+ * Compares real service durations, so a 90-minute visit at 09:00 also blocks 10:00.
+ *
+ * Pass the transaction client when calling inside `$transaction`: at Serializable
+ * isolation that makes this check-then-write atomic against a concurrent booking.
+ */
+export async function assertNoOverlap(
+  client: DbClient,
+  providerId: string,
+  date: string,
+  time: string,
+  duration: number,
+  excludeId?: string,
+) {
+  const want = slotWindow(time, duration);
+  const sameDay = await client.appointment.findMany({
     where: {
       providerId,
       date,
-      time,
       status: { not: "CANCELLED" },
       ...(excludeId ? { id: { not: excludeId } } : {}),
     },
-    select: { id: true },
+    select: { time: true, service: { select: { duration: true } } },
   });
-  if (clash) throw new ApiError("This time slot is already booked. Please choose a different slot.", 409);
+
+  const clash = sameDay.find((a) => {
+    const other = slotWindow(a.time, a.service.duration);
+    return want.start < other.end && other.start < want.end;
+  });
+  if (clash) {
+    throw new ApiError(
+      `This time overlaps an existing booking at ${clash.time}. Please choose a different slot.`,
+      409,
+    );
+  }
+}
+
+/**
+ * Rejects bookings in the past, outside opening hours, or off the slot grid.
+ * The `min` attribute on the client's date input is decoration - this is the real gate.
+ */
+export function assertBookable(date: string, time: string, duration: number, setting: Setting) {
+  const today = todayStr();
+  if (date < today) {
+    throw new ApiError("Appointments cannot be booked in the past.", 400);
+  }
+
+  const open = timeToMinutes(setting.openTime);
+  const close = timeToMinutes(setting.closeTime);
+  if (!(close > open)) {
+    throw new ApiError("Clinic opening hours are misconfigured. Please contact the clinic.", 409);
+  }
+
+  const start = timeToMinutes(time);
+  if (date === today && start <= clinicNowMinutes()) {
+    throw new ApiError("That time has already passed today. Please choose a later slot.", 400);
+  }
+  if (start < open || start + duration > close) {
+    throw new ApiError(
+      `Appointments must start and finish within opening hours (${setting.openTime}-${setting.closeTime}).`,
+      400,
+    );
+  }
+  if (setting.slotMinutes > 0 && (start - open) % setting.slotMinutes !== 0) {
+    throw new ApiError(`Start time must align to a ${setting.slotMinutes}-minute slot.`, 400);
+  }
 }

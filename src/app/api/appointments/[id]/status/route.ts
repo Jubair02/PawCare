@@ -3,7 +3,7 @@ import { ApiError, handleError, json, requireUser } from "@/lib/auth";
 import {
   ALL_STATUSES,
   APPOINTMENT_INCLUDE,
-  TRANSITIONS,
+  allowedTransitions,
   asString,
   notify,
   readBody,
@@ -41,14 +41,19 @@ export async function PATCH(req: Request, ctx: Ctx) {
       }
     }
 
+    // Providers may only drive their own appointments - not another provider's.
+    if (user.role === "VET" || user.role === "GROOMER") {
+      if (appointment.providerId !== user.id) {
+        throw new ApiError("You can only update appointments assigned to you.", 403);
+      }
+    }
+
     if (target === appointment.status) {
       throw new ApiError(`Appointment is already ${appointment.status}.`, 400);
     }
 
-    const allowed = [...(TRANSITIONS[appointment.status] ?? [])];
-    if (user.role === "ADMIN" && appointment.status === "PENDING" && target === "CHECKED_IN") {
-      allowed.push("CHECKED_IN"); // walk-in
-    }
+    // Includes the ADMIN walk-in shortcut (PENDING -> CHECKED_IN).
+    const allowed = allowedTransitions(appointment.status, user.role);
     if (!allowed.includes(target)) {
       throw new ApiError(`Invalid status transition from ${appointment.status} to ${target}.`, 400);
     }

@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { ApiError, handleError, json, publicUser, requireRole } from "@/lib/auth";
 import { hashPassword } from "@/lib/password";
 import type { Prisma } from "@prisma/client";
-import { EMAIL_RE, ROLES, asBoolean, asString, readBody } from "@/app/api/_lib/shape";
+import { EMAIL_RE, ROLES, asBoolean, asString, pageMeta, readBody, readPage } from "@/app/api/_lib/shape";
 
 /** GET /api/users — ADMIN/STAFF only. ?role=&q=&active= */
 export async function GET(req: Request) {
@@ -16,18 +16,29 @@ export async function GET(req: Request) {
 
     const q = url.searchParams.get("q");
     if (q) {
-      where.OR = [{ name: { contains: q } }, { email: { contains: q } }];
+      where.OR = [
+        { name: { contains: q, mode: "insensitive" } },
+        { email: { contains: q, mode: "insensitive" } },
+      ];
     }
 
     const active = asBoolean(url.searchParams.get("active"));
     if (active !== undefined) where.active = active;
 
-    const users = await db.user.findMany({
-      where,
-      include: { _count: { select: { pets: true, customerAppointments: true } } },
-      orderBy: { createdAt: "desc" },
+    const page = readPage(url);
+    const [users, total] = await Promise.all([
+      db.user.findMany({
+        where,
+        include: { _count: { select: { pets: true, customerAppointments: true } } },
+        orderBy: { createdAt: "desc" },
+        ...page,
+      }),
+      db.user.count({ where }),
+    ]);
+    return json({
+      users: users.map((u) => ({ ...publicUser(u), _count: u._count })),
+      page: pageMeta(total, page),
     });
-    return json({ users: users.map((u) => ({ ...publicUser(u), _count: u._count })) });
   } catch (e) {
     return handleError(e);
   }

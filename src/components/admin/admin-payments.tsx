@@ -1,15 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Banknote,
-  CalendarClock,
-  Loader2,
-  Receipt,
-  RotateCcw,
-  RefreshCw,
-  TrendingUp,
-} from "lucide-react";
+import { Banknote, CalendarClock, HandCoins, Loader2, Receipt, RefreshCw, RotateCcw, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -45,9 +37,10 @@ import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { apiFetch } from "@/lib/api";
+import { ListNotice } from "@/components/shared/list-notice";
 import { PAYMENT_METHODS } from "@/lib/constants";
-import { formatBDT, formatDate } from "@/lib/formatters";
-import type { PaymentDTO } from "@/lib/types";
+import { formatBDT, formatDate, formatInstantDate } from "@/lib/formatters";
+import type { PageMeta, PaymentDTO } from "@/lib/types";
 
 /* ------------------------------- constants -------------------------------- */
 
@@ -58,7 +51,7 @@ const METHOD_LABELS: Record<string, string> = {
 };
 
 /** ISO datetime → "20 Nov 2025" (formatDate expects yyyy-MM-dd). */
-const fmtPaidAt = (iso: string) => (iso ? new Date(iso).toISOString().slice(0, 10) : "");
+const fmtPaidAt = formatInstantDate;
 
 function isThisMonth(iso: string): boolean {
   const d = new Date(iso);
@@ -77,11 +70,14 @@ export function AdminPaymentsView() {
   const [refundTarget, setRefundTarget] = useState<PaymentDTO | null>(null);
   const [refunding, setRefunding] = useState(false);
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiFetch<{ payments: PaymentDTO[] }>("/api/payments");
+      const res = await apiFetch<{ payments: PaymentDTO[]; page?: PageMeta }>("/api/payments");
       setPayments(res.payments);
+      setPage(res.page ?? null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to load payments");
       setPayments(null);
@@ -123,6 +119,22 @@ export function AdminPaymentsView() {
 
   /* ------------------------------ mutations ------------------------------- */
 
+  const [collectingId, setCollectingId] = useState<string | null>(null);
+
+  // Cash sits as PENDING until someone at the desk confirms it changed hands.
+  async function collectCash(p: PaymentDTO) {
+    setCollectingId(p.id);
+    try {
+      await apiFetch(`/api/payments/${p.id}/collect`, { method: "PATCH" });
+      toast.success(`Collected ${formatBDT(p.amount)} from ${p.customer.name}`);
+      void load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not record the collection");
+    } finally {
+      setCollectingId(null);
+    }
+  }
+
   async function handleRefund() {
     if (!refundTarget) return;
     setRefunding(true);
@@ -147,6 +159,7 @@ export function AdminPaymentsView() {
           <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /> Refresh
         </Button>
       </SectionHeader>
+      <ListNotice page={page} noun="payments" />
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
@@ -258,11 +271,25 @@ export function AdminPaymentsView() {
                     </TableCell>
                     <TableCell>
                       <div className="flex justify-end">
-                        {p.status === "PAID" ? (
+                        {p.status === "PENDING" ? (
+                          <Button
+                            size="sm"
+                            className="min-h-10 whitespace-nowrap"
+                            disabled={collectingId === p.id}
+                            onClick={() => void collectCash(p)}
+                          >
+                            {collectingId === p.id ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <HandCoins className="size-4" />
+                            )}
+                            Mark received
+                          </Button>
+                        ) : p.status === "PAID" ? (
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="min-h-10 text-amber-600 hover:bg-amber-50 hover:text-amber-700"
+                            className="min-h-10 text-amber-600 dark:text-amber-300 hover:bg-amber-50 dark:bg-amber-950/40 hover:text-amber-700 dark:text-amber-200"
                             onClick={() => setRefundTarget(p)}
                           >
                             <RotateCcw className="size-4" /> Refund
@@ -303,12 +330,29 @@ export function AdminPaymentsView() {
                   </span>
                 </div>
                 <p className="mt-1 truncate font-mono text-xs text-muted-foreground">{p.transactionId}</p>
+                {p.status === "PENDING" ? (
+                  <div className="mt-3 flex justify-end">
+                    <Button
+                      size="sm"
+                      className="min-h-10"
+                      disabled={collectingId === p.id}
+                      onClick={() => void collectCash(p)}
+                    >
+                      {collectingId === p.id ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <HandCoins className="size-4" />
+                      )}
+                      Mark received
+                    </Button>
+                  </div>
+                ) : null}
                 {p.status === "PAID" ? (
                   <div className="mt-3 flex justify-end">
                     <Button
                       variant="outline"
                       size="sm"
-                      className="min-h-10 text-amber-600 hover:bg-amber-50 hover:text-amber-700"
+                      className="min-h-10 text-amber-600 dark:text-amber-300 hover:bg-amber-50 dark:bg-amber-950/40 hover:text-amber-700 dark:text-amber-200"
                       onClick={() => setRefundTarget(p)}
                     >
                       <RotateCcw className="size-4" /> Refund

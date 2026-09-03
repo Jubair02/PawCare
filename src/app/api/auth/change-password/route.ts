@@ -2,10 +2,14 @@ import { db } from "@/lib/db";
 import { ApiError, handleError, json, requireUser } from "@/lib/auth";
 import { hashPassword, verifyPassword } from "@/lib/password";
 import { asString, readBody } from "@/app/api/_lib/shape";
+import { HOUR, enforce } from "@/lib/rate-limit";
 
 export async function POST(req: Request) {
   try {
     const user = await requireUser(req);
+    // Guards the current-password check against being used as an oracle.
+    enforce(`change-password:${user.id}`, 10, HOUR, "Too many password change attempts.");
+
     const body = await readBody(req);
     const currentPassword = asString(body.currentPassword);
     const newPassword = asString(body.newPassword);

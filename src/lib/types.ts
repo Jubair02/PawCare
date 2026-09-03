@@ -231,9 +231,18 @@ export interface AdminOverviewData {
 }
 
 // ---- Misc API payloads ----
+/** Paging metadata returned by every list endpoint (see readPage/pageMeta). */
+export interface PageMeta {
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
 export interface NotificationsResponse {
   notifications: NotificationDTO[];
   unread: number;
+  page?: PageMeta;
 }
 export interface SlotsResponse {
   slots: string[];

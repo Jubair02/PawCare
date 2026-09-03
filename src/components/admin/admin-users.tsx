@@ -47,9 +47,10 @@ import {
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { apiFetch } from "@/lib/api";
-import { initials } from "@/lib/formatters";
+import { ListNotice } from "@/components/shared/list-notice";
+import { formatInstantDate, initials } from "@/lib/formatters";
 import { useAppStore } from "@/lib/store";
-import type { Role, UserDTO } from "@/lib/types";
+import type { PageMeta, Role, UserDTO } from "@/lib/types";
 
 /* ------------------------------- constants -------------------------------- */
 
@@ -63,11 +64,11 @@ const ROLE_TABS: { value: string; label: string }[] = [
 ];
 
 const ROLE_BADGE: Record<string, string> = {
-  ADMIN: "bg-violet-100 text-violet-800 border-violet-200",
-  STAFF: "bg-teal-100 text-teal-800 border-teal-200",
-  VET: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  GROOMER: "bg-amber-100 text-amber-800 border-amber-200",
-  CUSTOMER: "bg-stone-100 text-stone-700 border-stone-200",
+  ADMIN: "bg-violet-100 dark:bg-violet-950/50 text-violet-800 dark:text-violet-200 border-violet-200 dark:border-violet-900",
+  STAFF: "bg-teal-100 dark:bg-teal-950/50 text-teal-800 dark:text-teal-200 border-teal-200 dark:border-teal-900",
+  VET: "bg-emerald-100 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-200 border-emerald-200 dark:border-emerald-900",
+  GROOMER: "bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-200 border-amber-200 dark:border-amber-900",
+  CUSTOMER: "bg-stone-100 dark:bg-stone-950/50 text-stone-700 dark:text-stone-200 border-stone-200 dark:border-stone-900",
 };
 
 const SPECIALTY_OPTIONS = [
@@ -78,7 +79,7 @@ const SPECIALTY_OPTIONS = [
 const ALL_ROLES: Role[] = ["CUSTOMER", "VET", "GROOMER", "STAFF", "ADMIN"];
 
 /** ISO datetime → "20 Nov 2025" (formatDate expects yyyy-MM-dd). */
-const fmtJoined = (iso: string) => (iso ? new Date(iso).toISOString().slice(0, 10) : "");
+const fmtJoined = formatInstantDate;
 
 /* --------------------------------- view ----------------------------------- */
 
@@ -98,7 +99,7 @@ export function AdminUsersView() {
 
   // Edit dialog
   const [editing, setEditing] = useState<UserDTO | null>(null);
-  const [editForm, setEditForm] = useState({ name: "", phone: "", role: "CUSTOMER", specialty: "", bio: "" });
+  const [editForm, setEditForm] = useState({ name: "", phone: "", role: "CUSTOMER", specialty: "", bio: "", password: "" });
 
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<UserDTO | null>(null);
@@ -110,6 +111,8 @@ export function AdminUsersView() {
     return () => clearTimeout(t);
   }, [search]);
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -117,8 +120,9 @@ export function AdminUsersView() {
       if (roleFilter !== "ALL") params.set("role", roleFilter);
       if (q) params.set("q", q);
       const qs = params.toString();
-      const res = await apiFetch<{ users: UserDTO[] }>(`/api/users${qs ? `?${qs}` : ""}`);
+      const res = await apiFetch<{ users: UserDTO[]; page?: PageMeta }>(`/api/users${qs ? `?${qs}` : ""}`);
       setUsers(res.users);
+      setPage(res.page ?? null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to load users");
       setUsers(null);
@@ -170,6 +174,7 @@ export function AdminUsersView() {
       role: u.role,
       specialty: u.specialty ?? "",
       bio: u.bio ?? "",
+      password: "",
     });
   }
 
@@ -177,6 +182,10 @@ export function AdminUsersView() {
     if (!editing) return;
     if (!editForm.name.trim()) {
       toast.error("Name cannot be empty.");
+      return;
+    }
+    if (editForm.password && editForm.password.length < 6) {
+      toast.error("New password must be at least 6 characters.");
       return;
     }
     setSaving(true);
@@ -189,9 +198,10 @@ export function AdminUsersView() {
           role: editForm.role,
           specialty: editForm.role === "VET" || editForm.role === "GROOMER" ? editForm.specialty || undefined : undefined,
           bio: editForm.bio.trim() || undefined,
+          ...(editForm.password ? { password: editForm.password } : {}),
         },
       });
-      toast.success("User updated");
+      toast.success(editForm.password ? "User updated — password reset" : "User updated");
       setEditing(null);
       void load();
     } catch (e) {
@@ -245,6 +255,7 @@ export function AdminUsersView() {
           <UserPlus className="size-4" /> Add user
         </Button>
       </SectionHeader>
+      <ListNotice page={page} noun="users" />
 
       {/* Filters */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -336,7 +347,7 @@ export function AdminUsersView() {
                       <TableCell className="text-center text-sm">{u._count?.customerAppointments ?? 0}</TableCell>
                       <TableCell>
                         {isSelf ? (
-                          <Badge variant="outline" className="bg-stone-100 text-stone-700 border-stone-200">
+                          <Badge variant="outline" className="bg-stone-100 dark:bg-stone-950/50 text-stone-700 dark:text-stone-200 border-stone-200 dark:border-stone-900">
                             YOU
                           </Badge>
                         ) : (
@@ -359,7 +370,7 @@ export function AdminUsersView() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="size-10 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                            className="size-10 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:bg-rose-950/40 hover:text-rose-700 dark:text-rose-200"
                             disabled={isSelf || u.role === "ADMIN"}
                             onClick={() => setDeleteTarget(u)}
                             aria-label={`Delete ${u.name}`}
@@ -403,7 +414,7 @@ export function AdminUsersView() {
                       </div>
                       <div className="mt-3 flex items-center justify-between">
                         {isSelf ? (
-                          <Badge variant="outline" className="bg-stone-100 text-stone-700 border-stone-200">
+                          <Badge variant="outline" className="bg-stone-100 dark:bg-stone-950/50 text-stone-700 dark:text-stone-200 border-stone-200 dark:border-stone-900">
                             YOU
                           </Badge>
                         ) : (
@@ -423,7 +434,7 @@ export function AdminUsersView() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="size-10 text-rose-600"
+                            className="size-10 text-rose-600 dark:text-rose-300"
                             disabled={isSelf || u.role === "ADMIN"}
                             onClick={() => setDeleteTarget(u)}
                             aria-label={`Delete ${u.name}`}
@@ -561,6 +572,20 @@ export function AdminUsersView() {
             <div className="grid gap-2">
               <Label htmlFor="edit-bio">Bio</Label>
               <Textarea id="edit-bio" rows={3} value={editForm.bio} onChange={(e) => setEditForm({ ...editForm, bio: e.target.value })} placeholder="Short professional bio" />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-password">Reset password</Label>
+              <Input
+                id="edit-password"
+                type="password"
+                autoComplete="new-password"
+                value={editForm.password}
+                onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+                placeholder="Leave blank to keep current password"
+              />
+              <p className="text-xs text-muted-foreground">
+                Account recovery for a locked-out user. Takes effect immediately and notifies them.
+              </p>
             </div>
           </div>
           <DialogFooter>

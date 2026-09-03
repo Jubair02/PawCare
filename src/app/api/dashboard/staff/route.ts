@@ -1,15 +1,15 @@
 import { db } from "@/lib/db";
 import { handleError, json, requireRole } from "@/lib/auth";
-import { APPOINTMENT_INCLUDE, shapeAppointment, todayStr } from "@/app/api/_lib/shape";
+import { APPOINTMENT_INCLUDE, clinicDayBoundsUtc, shapeAppointment, todayStr } from "@/app/api/_lib/shape";
 
 /** GET /api/dashboard/staff — StaffDashboardData. */
 export async function GET(req: Request) {
   try {
     await requireRole(req, "STAFF");
     const today = todayStr();
-    const now = new Date();
-    const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const dayEnd = new Date(dayStart.getTime() + 86_400_000);
+    // Same clinic day the appointment counts use - previously this was server-local
+    // midnight while `today` was a UTC date, so the two panels covered different windows.
+    const { start: dayStart, end: dayEnd } = clinicDayBoundsUtc(today);
 
     const [todayAppointments, pendingAppointments, checkedInToday, revenueToday, totalCustomers, totalPets, scheduleRaw] =
       await Promise.all([

@@ -60,6 +60,7 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { apiFetch } from "@/lib/api";
+import { ListNotice } from "@/components/shared/list-notice";
 import { PAYMENT_METHODS } from "@/lib/constants";
 import {
   formatBDT,
@@ -70,14 +71,7 @@ import {
   petEmoji,
 } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
-import type {
-  AppointmentDTO,
-  PaymentMethod,
-  PetDTO,
-  ProviderDTO,
-  ServiceDTO,
-  UserDTO,
-} from "@/lib/types";
+import type { AppointmentDTO, PageMeta, PaymentMethod, PetDTO, ProviderDTO, ServiceDTO, UserDTO } from "@/lib/types";
 
 const STATUS_OPTIONS = ["PENDING", "CONFIRMED", "CHECKED_IN", "IN_PROGRESS", "COMPLETED", "CANCELLED"];
 
@@ -482,7 +476,7 @@ function CreateAppointmentDialog({
                 ))}
               </div>
             ) : pets.length === 0 ? (
-              <p className="rounded-xl border border-dashed bg-amber-50/60 px-4 py-6 text-center text-sm text-amber-800">
+              <p className="rounded-xl border border-dashed bg-amber-50/60 px-4 py-6 text-center text-sm text-amber-800 dark:text-amber-200">
                 This customer has no pets — they must add one first.
               </p>
             ) : (
@@ -906,10 +900,13 @@ export function StaffAppointmentsView() {
     kind: "decline" | "cancel";
   } | null>(null);
 
+  const [page, setPage] = useState<PageMeta | null>(null);
+
   const load = useCallback(async () => {
     try {
-      const res = await apiFetch<{ appointments: AppointmentDTO[] }>("/api/appointments");
+      const res = await apiFetch<{ appointments: AppointmentDTO[]; page?: PageMeta }>("/api/appointments");
       setAppointments(res.appointments);
+      setPage(res.page ?? null);
     } catch (e) {
       toast.error(errMsg(e));
     } finally {
@@ -991,7 +988,7 @@ export function StaffAppointmentsView() {
         <Button
           size={size}
           variant="outline"
-          className="border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+          className="border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:bg-rose-950/40 hover:text-rose-700 dark:text-rose-200"
           disabled={disabled}
           onClick={(e) => {
             e.stopPropagation();
@@ -1023,7 +1020,7 @@ export function StaffAppointmentsView() {
         <Button
           size={size}
           variant="outline"
-          className="border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+          className="border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:bg-rose-950/40 hover:text-rose-700 dark:text-rose-200"
           disabled={disabled}
           onClick={(e) => {
             e.stopPropagation();
@@ -1055,7 +1052,7 @@ export function StaffAppointmentsView() {
         <Button
           size={size}
           variant="outline"
-          className="border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+          className="border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:bg-rose-950/40 hover:text-rose-700 dark:text-rose-200"
           disabled={disabled}
           onClick={(e) => {
             e.stopPropagation();
@@ -1089,7 +1086,7 @@ export function StaffAppointmentsView() {
         <Button
           size={size}
           variant="outline"
-          className="border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+          className="border-amber-200 dark:border-amber-900 text-amber-700 dark:text-amber-200 hover:bg-amber-50 dark:bg-amber-950/40 hover:text-amber-800"
           disabled={disabled}
           onClick={(e) => {
             e.stopPropagation();
@@ -1120,6 +1117,7 @@ export function StaffAppointmentsView() {
           New appointment
         </Button>
       </SectionHeader>
+      <ListNotice page={page} noun="appointments" />
 
       {/* Filters */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
