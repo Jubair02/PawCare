@@ -25,8 +25,8 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { apiFetch } from "@/lib/api";
-import { LANDING_ANCHORS } from "@/lib/constants";
-import { formatBDT, initials } from "@/lib/formatters";
+import { LANDING_ANCHORS, categoryTile } from "@/lib/constants";
+import { formatBDT, formatTime, initials } from "@/lib/formatters";
 import { homeViewForRole, useAppStore } from "@/lib/store";
 import type { ProviderDTO, ReviewDTO, ServiceDTO, SettingDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -79,12 +79,6 @@ const CATEGORY_BADGE: Record<string, string> = {
   DIAGNOSTIC: "bg-violet-100 dark:bg-violet-950/50 text-violet-700 dark:text-violet-200 border-violet-200 dark:border-violet-900",
 };
 
-const CATEGORY_TILE: Record<string, string> = {
-  MEDICAL: "bg-gradient-to-br from-emerald-600 to-teal-500",
-  GROOMING: "bg-gradient-to-br from-amber-400 to-amber-500",
-  DIAGNOSTIC: "bg-gradient-to-br from-violet-500 to-violet-600",
-};
-
 function scrollToId(id: string) {
   document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
@@ -97,12 +91,10 @@ interface StatItem {
   icon: LucideIcon;
 }
 
-const STATS: StatItem[] = [
-  { value: "1,200+", label: "Pets cared", icon: PawPrint },
-  { value: "3", label: "Vets & groomers", icon: Stethoscope },
-  { value: "8+", label: "Services", icon: Sparkles },
-  { value: "4.9", label: "Avg rating", icon: Star },
-];
+// The stats strip is derived from live data at render time. It used to be a
+// hardcoded list ("1,200+ pets cared", "4.9 avg rating") sitting directly above
+// the real services, providers and reviews this page fetches — a visitor who
+// counted the reviews on screen caught the number out.
 
 const STEPS: { title: string; description: string; icon: LucideIcon }[] = [
   { title: "Search service", description: "Browse vet consultations, grooming, diagnostics and more.", icon: Search },
@@ -111,14 +103,21 @@ const STEPS: { title: string; description: string; icon: LucideIcon }[] = [
   { title: "Pay & relax", description: "Pay by cash, card or mobile banking after the visit.", icon: Wallet },
 ];
 
-function ServiceCard({ service, onBook }: { service: ServiceDTO; onBook: () => void }) {
+function ServiceCard({
+  service,
+  onBook,
+}: {
+  service: ServiceDTO;
+  /** Omitted for viewers who cannot book (staff, vets, admins). */
+  onBook?: () => void;
+}) {
   return (
     <Card className="gap-3 p-4 transition-shadow hover:shadow-md h-full">
       <div className="flex items-start justify-between gap-2">
         <div
           className={cn(
             "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-2xl shadow-sm",
-            CATEGORY_TILE[service.category] ?? CATEGORY_TILE.MEDICAL
+            categoryTile(service.category)
           )}
           aria-hidden
         >
@@ -151,10 +150,12 @@ function ServiceCard({ service, onBook }: { service: ServiceDTO; onBook: () => v
           </span>
         )}
       </div>
-      <Button size="sm" className="mt-auto w-full" onClick={onBook}>
-        <CalendarPlus className="size-4" />
-        Book now
-      </Button>
+{onBook ? (
+              <Button size="sm" className="mt-auto w-full" onClick={onBook}>
+          <CalendarPlus className="size-4" />
+          Book now
+        </Button>
+      ) : null}
     </Card>
   );
 }
@@ -250,6 +251,36 @@ export function LandingView() {
     setAuthMode(mode);
     setView("auth");
   };
+
+  // Approved reviews are the only ones the public endpoint returns, so these are
+  // exactly the ratings a visitor can scroll down and verify.
+  const reviewCount = reviews?.length ?? 0;
+  const avgRating =
+    reviewCount > 0
+      ? Math.round((reviews!.reduce((sum, r) => sum + r.rating, 0) / reviewCount) * 10) / 10
+      : null;
+  const providerCount = providers?.length ?? 0;
+  const serviceCount = services?.length ?? 0;
+
+  const liveStats: StatItem[] = [
+    { value: providerCount > 0 ? String(providerCount) : "—", label: "Vets & groomers", icon: Stethoscope },
+    { value: serviceCount > 0 ? String(serviceCount) : "—", label: "Services offered", icon: Sparkles },
+    {
+      value: avgRating !== null ? avgRating.toFixed(1) : "—",
+      label: reviewCount === 1 ? "From 1 review" : `From ${reviewCount} reviews`,
+      icon: Star,
+    },
+    {
+      value: setting ? `${setting.openTime.slice(0, 5)}–${setting.closeTime.slice(0, 5)}` : "—",
+      label: "Open daily",
+      icon: PawPrint,
+    },
+  ];
+
+  // Only visitors who can actually book see a booking CTA. A signed-in vet or
+  // admin used to get "Book an appointment" that silently dropped them on their
+  // own dashboard, which reads as a broken button on a marketing page.
+  const canBook = !user || user.role === "CUSTOMER";
 
   const bookNow = () => {
     if (user?.role === "CUSTOMER") setView("cust-book");
@@ -361,17 +392,21 @@ export function LandingView() {
               <div className="mt-6 flex flex-wrap gap-3">
                 <Button size="lg" onClick={bookNow} className="min-h-11">
                   <CalendarPlus className="size-4" />
-                  Book an appointment
+                  {canBook ? "Book an appointment" : "Go to your dashboard"}
                 </Button>
                 <Button size="lg" variant="outline" onClick={() => scrollToId("services")} className="min-h-11">
                   Browse services
                 </Button>
               </div>
-              <div className="mt-6 flex flex-wrap items-center gap-3">
-                <Stars value={5} />
-                <span className="text-sm font-semibold">4.9 avg rating</span>
-                <span className="text-sm text-muted-foreground">· from 120+ verified reviews</span>
-              </div>
+              {avgRating !== null ? (
+                <div className="mt-6 flex flex-wrap items-center gap-3">
+                  <Stars value={Math.round(avgRating)} />
+                  <span className="text-sm font-semibold">{avgRating.toFixed(1)} avg rating</span>
+                  <span className="text-sm text-muted-foreground">
+                    · from {reviewCount} verified {reviewCount === 1 ? "review" : "reviews"}
+                  </span>
+                </div>
+              ) : null}
             </FadeIn>
 
             <FadeIn delay={0.15} className="relative">
@@ -392,12 +427,17 @@ export function LandingView() {
                   className="absolute -right-3 top-6 rounded-2xl border bg-card/95 p-3 shadow-lg backdrop-blur sm:-right-6"
                 >
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Next available
+                    Clinic hours
                   </p>
                   <p className="mt-1 flex items-center gap-1.5 text-sm font-semibold">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500" /> Today · 3:00 PM
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                    {setting ? `${formatTime(setting.openTime)} – ${formatTime(setting.closeTime)}` : "Open daily"}
                   </p>
-                  <p className="text-xs text-muted-foreground">Dr. Nusrat Jahan</p>
+                  <p className="text-xs text-muted-foreground">
+                    {providerCount > 0
+                      ? `${providerCount} ${providerCount === 1 ? "provider" : "providers"} available`
+                      : "Book online anytime"}
+                  </p>
                 </motion.div>
                 {/* floating card: happy clients */}
                 <motion.div
@@ -415,7 +455,11 @@ export function LandingView() {
                     ))}
                   </div>
                   <div>
-                    <p className="text-sm font-semibold">1,200+ happy clients</p>
+                    <p className="text-sm font-semibold">
+                      {reviewCount > 0
+                        ? `${reviewCount} verified ${reviewCount === 1 ? "review" : "reviews"}`
+                        : "Trusted local care"}
+                    </p>
                     <p className="flex items-center gap-1 text-xs text-muted-foreground">
                       <Star className="size-3 fill-amber-400 text-amber-400" /> loved by pet parents
                     </p>
@@ -430,7 +474,7 @@ export function LandingView() {
         <section className="mx-auto w-full max-w-7xl px-4 md:px-6">
           <FadeIn>
             <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border bg-border md:grid-cols-4">
-              {STATS.map((s) => (
+              {liveStats.map((s) => (
                 <div key={s.label} className="flex flex-col items-center gap-1 bg-card p-6 text-center">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
                     <s.icon className="size-5" />
@@ -476,7 +520,7 @@ export function LandingView() {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {services.map((s, i) => (
                 <FadeIn key={s.id} delay={Math.min(i * 0.05, 0.3)} className="h-full">
-                  <ServiceCard service={s} onBook={bookNow} />
+                  <ServiceCard service={s} onBook={canBook ? bookNow : undefined} />
                 </FadeIn>
               ))}
             </div>
@@ -595,10 +639,12 @@ export function LandingView() {
               <div className="grid items-center gap-6 p-8 md:grid-cols-2 md:p-12">
                 <div>
                   <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
-                    Ready to pamper your pet?
+                    {canBook ? "Ready to pamper your pet?" : "Thanks for all you do"}
                   </h2>
                   <p className="mt-3 max-w-md text-emerald-50">
-                    Create a free account, add your companions and book your first visit in under two minutes.
+                    {canBook
+                      ? "Create a free account, add your companions and book your first visit in under two minutes."
+                      : "Your schedule, patients and records are waiting in your dashboard."}
                   </p>
                   <Button
                     size="lg"
@@ -606,7 +652,7 @@ export function LandingView() {
                     className="mt-6 min-h-11 bg-white text-emerald-700 dark:text-emerald-200 hover:bg-emerald-50 dark:bg-emerald-950/40"
                   >
                     <CalendarPlus className="size-4" />
-                    Book an appointment
+                    {canBook ? "Book an appointment" : "Go to your dashboard"}
                   </Button>
                 </div>
                 <div className="overflow-hidden rounded-2xl shadow-lg">
@@ -682,7 +728,9 @@ export function LandingView() {
               <li className="flex items-center gap-2">
                 <Clock className="size-4 shrink-0 text-emerald-300" />
                 Open daily{" "}
-                {setting ? `${setting.openTime} – ${setting.closeTime}` : "9:00 AM – 5:00 PM"}
+                {setting
+                  ? `${formatTime(setting.openTime)} – ${formatTime(setting.closeTime)}`
+                  : "9:00 AM – 5:00 PM"}
               </li>
             </ul>
           </div>

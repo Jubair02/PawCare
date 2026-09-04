@@ -53,6 +53,21 @@ const CATEGORY_BADGE: Record<string, string> = {
 
 const ICON_PRESETS = ["🩺", "💉", "🦷", "✂️", "🛁", "🐕", "🏥", "🧪", "🐾"];
 
+const bookingCount = (s: ServiceDTO) => s._count?.appointments ?? 0;
+
+/**
+ * Why Delete is offered, or why it is not.
+ *
+ * `DELETE /api/services/:id` always rejects a service that has appointments,
+ * so offering the button there only produced a 409 the admin could not act on.
+ * Deactivating (the Active switch) is the real way to retire such a service.
+ */
+function deleteHint(s: ServiceDTO): string {
+  const bookings = bookingCount(s);
+  if (bookings === 0) return `Delete ${s.name}`;
+  return `${s.name} has ${bookings} booking${bookings === 1 ? "" : "s"} and cannot be deleted — switch it to inactive instead`;
+}
+
 interface ServiceForm {
   name: string;
   category: string;
@@ -196,12 +211,12 @@ export function AdminServicesView() {
       setDeleteTarget(null);
       void load();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Could not delete service";
-      toast.error(
-        msg.toLowerCase().includes("deactivate") || msg.includes("appointments") || msg.includes("409")
-          ? "Service has bookings — deactivate instead"
-          : msg
-      );
+      // The server's own message is already specific ("This service has
+      // appointments and cannot be deleted. Deactivate it instead."), so show
+      // it. The old code tried to detect that case by looking for "409" in the
+      // text, which never appears: apiFetch throws `Error(data.error)` and
+      // drops the status code entirely.
+      toast.error(e instanceof Error ? e.message : "Could not delete service.");
     } finally {
       setDeleting(false);
     }
@@ -317,9 +332,11 @@ export function AdminServicesView() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="size-10 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:bg-rose-950/40 hover:text-rose-700 dark:text-rose-200"
+                          className="size-10 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-700 dark:hover:text-rose-200"
                           onClick={() => setDeleteTarget(s)}
-                          aria-label={`Delete ${s.name}`}
+                          disabled={bookingCount(s) > 0}
+                          aria-label={deleteHint(s)}
+                          title={deleteHint(s)}
                         >
                           <Trash2 className="size-4" />
                         </Button>
@@ -382,7 +399,9 @@ export function AdminServicesView() {
                           size="icon"
                           className="size-10 text-rose-600 dark:text-rose-300"
                           onClick={() => setDeleteTarget(s)}
-                          aria-label={`Delete ${s.name}`}
+                          disabled={bookingCount(s) > 0}
+                          aria-label={deleteHint(s)}
+                          title={deleteHint(s)}
                         >
                           <Trash2 className="size-4" />
                         </Button>
@@ -518,7 +537,7 @@ export function AdminServicesView() {
             <AlertDialogTitle>Delete service?</AlertDialogTitle>
             <AlertDialogDescription>
               {deleteTarget
-                ? `“${deleteTarget.name}” (${formatBDT(deleteTarget.price)}) will be permanently removed. Services with existing bookings cannot be deleted — deactivate them instead.`
+                ? `“${deleteTarget.name}” (${formatBDT(deleteTarget.price)}) will be permanently removed from the catalogue. It has no bookings, so no appointment history is affected. This cannot be undone.`
                 : ""}
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -37,6 +37,18 @@ export interface NavItem {
 }
 
 /** Sidebar/mobile nav per role (CONTRACT view registry). cust-pet-detail is reached programmatically. */
+/**
+ * What a provider's own records are called, per specialty.
+ *
+ * One source of truth: the nav, the dashboard tile and the page header used to
+ * call the same destination "Treatments", "Records" and "Session records"
+ * respectively when a groomer was signed in.
+ */
+export const PROVIDER_RECORDS_LABEL: Record<"VET" | "GROOMER", string> = {
+  VET: "Treatments",
+  GROOMER: "Session Records",
+};
+
 export const NAV_ITEMS: Record<Role, NavItem[]> = {
   CUSTOMER: [
     { view: "cust-dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -53,7 +65,7 @@ export const NAV_ITEMS: Record<Role, NavItem[]> = {
     { view: "vet-dashboard", label: "Dashboard", icon: LayoutDashboard },
     { view: "vet-appointments", label: "Appointments", icon: CalendarDays },
     { view: "vet-patients", label: "Patients", icon: PawPrint },
-    { view: "vet-treatments", label: "Treatments", icon: Stethoscope },
+    { view: "vet-treatments", label: PROVIDER_RECORDS_LABEL.VET, icon: Stethoscope },
     { view: "vet-schedule", label: "Schedule", icon: CalendarClock },
     { view: "vet-profile", label: "Profile", icon: User },
   ],
@@ -61,7 +73,7 @@ export const NAV_ITEMS: Record<Role, NavItem[]> = {
     { view: "vet-dashboard", label: "Dashboard", icon: LayoutDashboard },
     { view: "vet-appointments", label: "Appointments", icon: CalendarDays },
     { view: "vet-patients", label: "Patients", icon: PawPrint },
-    { view: "vet-treatments", label: "Treatments", icon: Scissors },
+    { view: "vet-treatments", label: PROVIDER_RECORDS_LABEL.GROOMER, icon: Scissors },
     { view: "vet-schedule", label: "Schedule", icon: CalendarClock },
     { view: "vet-profile", label: "Profile", icon: User },
   ],
@@ -169,3 +181,45 @@ export const LANDING_ANCHORS = [
   { href: "#team", label: "Our team" },
   { href: "#reviews", label: "Reviews" },
 ];
+
+/**
+ * Pet photos are stored inline as base64, so the client caps uploads before
+ * sending. The API enforces the same ceiling (MAX_PHOTO_BYTES in
+ * src/app/api/_lib/shape.ts) — this is only a courtesy check.
+ */
+export const MAX_PHOTO_BYTES = 400 * 1024; // 400KB
+
+/** Gradient used for a service's emoji tile, keyed by service category. */
+export const CATEGORY_TILE: Record<string, string> = {
+  MEDICAL: "bg-gradient-to-br from-emerald-600 to-teal-500",
+  GROOMING: "bg-gradient-to-br from-amber-400 to-amber-500",
+  DIAGNOSTIC: "bg-gradient-to-br from-violet-500 to-violet-600",
+};
+
+/** Tile gradient for a category, falling back to the medical one. */
+export function categoryTile(category?: string | null): string {
+  return (category && CATEGORY_TILE[category]) || CATEGORY_TILE.MEDICAL;
+}
+
+/* --------------------------- enum → display copy --------------------------- */
+/** These keep raw enum values ("MALE", "MOBILE") out of the interface. */
+
+export function petTypeLabel(type: string): string {
+  return PET_TYPES.find((t) => t.value === type)?.label ?? type;
+}
+
+export function genderLabel(gender?: string | null): string {
+  if (!gender) return "—";
+  if (gender === "MALE") return "Male";
+  if (gender === "FEMALE") return "Female";
+  return gender;
+}
+
+export function paymentMethodLabel(method: string): string {
+  return PAYMENT_METHODS.find((m) => m.value === method)?.label ?? method;
+}
+
+export function vaccinationLabel(status?: string | null): string {
+  if (!status) return "—";
+  return VACCINATION_STATUSES.find((v) => v.value === status)?.label ?? status;
+}

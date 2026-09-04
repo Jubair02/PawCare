@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { ApiError, handleError, json, requireRole } from "@/lib/auth";
-import { SERVICE_CATEGORIES, asBoolean, asNumber, asString, readBody, serviceRatings, shapeService } from "@/app/api/_lib/shape";
+import { MAX_LEN, SERVICE_CATEGORIES, asBoolean, asBoundedString, asNumber, asString, readBody, serviceRatings, shapeService } from "@/app/api/_lib/shape";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -23,7 +23,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
       active?: boolean;
     } = {};
 
-    const name = asString(body.name);
+    const name = asBoundedString(body.name, MAX_LEN.NAME, "Service name");
     if (name !== undefined) {
       if (!name) throw new ApiError("Service name cannot be empty.", 400);
       data.name = name;
@@ -35,7 +35,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
       }
       data.category = category;
     }
-    const description = asString(body.description);
+    const description = asBoundedString(body.description, MAX_LEN.LONG, "Description");
     if (description !== undefined) data.description = description;
     const duration = asNumber(body.duration);
     if (duration !== undefined) {
@@ -49,7 +49,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
       if (price < 0) throw new ApiError("Price must be a non-negative number.", 400);
       data.price = price;
     }
-    const icon = asString(body.icon);
+    const icon = asBoundedString(body.icon, MAX_LEN.SHORT, "Icon");
     if (icon !== undefined) data.icon = icon;
     const active = asBoolean(body.active);
     if (active !== undefined) data.active = active;

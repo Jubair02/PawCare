@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { ChangeEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowLeft,
@@ -18,51 +17,23 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import { apiFetch } from "@/lib/api";
-import { PAYMENT_METHODS, PET_TYPES, VACCINATION_STATUSES } from "@/lib/constants";
-import { formatBDT, formatDate, formatTime, initials, petEmoji } from "@/lib/formatters";
+import { apiFetch, errMsg, isAbortError } from "@/lib/api";
+import { categoryTile } from "@/lib/constants";
+import { clinicToday, formatBDT, formatDate, formatTime, initials, petEmoji } from "@/lib/formatters";
 import { useAppStore } from "@/lib/store";
-import type { AppointmentDTO, PaymentDTO, PetDTO, ProviderDTO, ServiceDTO } from "@/lib/types";
+import type { AppointmentDTO, PetDTO, ProviderDTO, ServiceDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/shared/empty-state";
+import { PaymentDialog } from "@/components/shared/payment-dialog";
+import { PetFormDialog } from "@/components/shared/pet-form-dialog";
 import { StatusBadge } from "@/components/shared/status-badge";
 
-const MAX_PHOTO_BYTES = 400 * 1024; // 400KB
 const STEPS = ["Service", "Pet", "Provider", "Date & time", "Confirm"];
-
-const CATEGORY_TILE: Record<string, string> = {
-  MEDICAL: "bg-gradient-to-br from-emerald-600 to-teal-500",
-  GROOMING: "bg-gradient-to-br from-amber-400 to-amber-500",
-  DIAGNOSTIC: "bg-gradient-to-br from-violet-500 to-violet-600",
-};
-
-function todayStr(): string {
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(
-    n.getDate()
-  ).padStart(2, "0")}`;
-}
 
 function Stars({ value, count }: { value: number | null | undefined; count?: number }) {
   if (value === null || value === undefined) {
@@ -86,354 +57,6 @@ function StepHint({ show, children }: { show: boolean; children: React.ReactNode
   );
 }
 
-// ---------- Step 2 inline add-pet dialog ----------
-
-interface NewPetForm {
-  name: string;
-  type: string;
-  breed: string;
-  gender: string;
-  birthDate: string;
-  weight: string;
-  color: string;
-  vaccinationStatus: string;
-  medicalNotes: string;
-  photo: string;
-}
-
-const EMPTY_NEW_PET: NewPetForm = {
-  name: "",
-  type: "DOG",
-  breed: "",
-  gender: "MALE",
-  birthDate: "",
-  weight: "",
-  color: "",
-  vaccinationStatus: "NONE",
-  medicalNotes: "",
-  photo: "",
-};
-
-function InlineAddPetDialog({
-  open,
-  onOpenChange,
-  onCreated,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  onCreated: (pet: PetDTO) => void;
-}) {
-  const [form, setForm] = useState<NewPetForm>(EMPTY_NEW_PET);
-  const [saving, setSaving] = useState(false);
-  const [nameError, setNameError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (open) {
-      setForm(EMPTY_NEW_PET);
-      setNameError(null);
-    }
-  }, [open]);
-
-  const set = (key: keyof NewPetForm, value: string) => setForm((f) => ({ ...f, [key]: value }));
-
-  function handlePhoto(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please choose an image file");
-      e.target.value = "";
-      return;
-    }
-    if (file.size > MAX_PHOTO_BYTES) {
-      toast.error("Image is too large — please pick one under 400KB");
-      e.target.value = "";
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => set("photo", String(reader.result ?? ""));
-    reader.readAsDataURL(file);
-  }
-
-  async function handleCreate() {
-    if (!form.name.trim()) {
-      setNameError("Pet name is required");
-      return;
-    }
-    setSaving(true);
-    try {
-      const res = await apiFetch<{ pet: PetDTO }>("/api/pets", {
-        method: "POST",
-        body: {
-          name: form.name.trim(),
-          type: form.type,
-          breed: form.breed.trim() || undefined,
-          gender: form.gender,
-          birthDate: form.birthDate || undefined,
-          weight: form.weight ? Number(form.weight) : undefined,
-          color: form.color.trim() || undefined,
-          vaccinationStatus: form.vaccinationStatus,
-          medicalNotes: form.medicalNotes.trim() || undefined,
-          photo: form.photo || undefined,
-        },
-      });
-      toast.success(`${res.pet.name} added`);
-      onOpenChange(false);
-      onCreated(res.pet);
-    } catch (err) {
-      toast.error((err as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto scrollbar-thin sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Add a new pet</DialogTitle>
-          <DialogDescription>
-            Tell us about your companion so we can care for them better.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="book-pet-name">
-              Name <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="book-pet-name"
-              value={form.name}
-              onChange={(e) => {
-                set("name", e.target.value);
-                if (nameError) setNameError(null);
-              }}
-              placeholder="e.g. Bruno"
-              aria-invalid={!!nameError}
-            />
-            {nameError ? <p className="text-xs text-destructive">{nameError}</p> : null}
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <Label>Type</Label>
-              <Select value={form.type} onValueChange={(v) => set("type", v)}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select type" />
-                </SelectTrigger>
-                <SelectContent>
-                  {PET_TYPES.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>
-                      {t.emoji} {t.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="book-pet-breed">Breed</Label>
-              <Input
-                id="book-pet-breed"
-                value={form.breed}
-                onChange={(e) => set("breed", e.target.value)}
-                placeholder="e.g. Poodle"
-              />
-            </div>
-          </div>
-          <div className="grid gap-2">
-            <Label>Gender</Label>
-            <RadioGroup value={form.gender} onValueChange={(v) => set("gender", v)} className="flex gap-6">
-              <div className="flex items-center gap-2">
-                <RadioGroupItem value="MALE" id="book-gender-male" />
-                <Label htmlFor="book-gender-male" className="font-normal">
-                  Male
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <RadioGroupItem value="FEMALE" id="book-gender-female" />
-                <Label htmlFor="book-gender-female" className="font-normal">
-                  Female
-                </Label>
-              </div>
-            </RadioGroup>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <Label htmlFor="book-pet-birth">Birth date</Label>
-              <Input
-                id="book-pet-birth"
-                type="date"
-                value={form.birthDate}
-                onChange={(e) => set("birthDate", e.target.value)}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="book-pet-weight">Weight (kg)</Label>
-              <Input
-                id="book-pet-weight"
-                type="number"
-                min="0"
-                step="0.1"
-                value={form.weight}
-                onChange={(e) => set("weight", e.target.value)}
-                placeholder="e.g. 12.5"
-              />
-            </div>
-          </div>
-          <div className="grid gap-2">
-            <Label>Vaccination status</Label>
-            <Select value={form.vaccinationStatus} onValueChange={(v) => set("vaccinationStatus", v)}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select status" />
-              </SelectTrigger>
-              <SelectContent>
-                {VACCINATION_STATUSES.map((v) => (
-                  <SelectItem key={v.value} value={v.value}>
-                    {v.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="book-pet-notes">Medical notes</Label>
-            <Textarea
-              id="book-pet-notes"
-              value={form.medicalNotes}
-              onChange={(e) => set("medicalNotes", e.target.value)}
-              placeholder="Allergies, chronic conditions, medication..."
-              rows={3}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="book-pet-photo">Photo</Label>
-            <div className="flex items-center gap-3">
-              {form.photo ? (
-                 
-                <img
-                  src={form.photo}
-                  alt="Pet preview"
-                  loading="lazy"
-                  decoding="async"
-                  className="h-14 w-14 rounded-xl border object-cover"
-                />
-              ) : (
-                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 text-2xl">
-                  {petEmoji(form.type)}
-                </div>
-              )}
-              <Input
-                id="book-pet-photo"
-                type="file"
-                accept="image/*"
-                onChange={handlePhoto}
-                className="h-11"
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">JPG or PNG, up to 400KB.</p>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving} className="min-h-11">
-            Cancel
-          </Button>
-          <Button onClick={handleCreate} disabled={saving} className="min-h-11">
-            {saving ? <Loader2 className="animate-spin" /> : null}
-            Add pet
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ---------- Payment dialog (post-booking) ----------
-
-function PaymentDialog({
-  appointment,
-  open,
-  onOpenChange,
-  onDone,
-}: {
-  appointment: AppointmentDTO | null;
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  onDone: () => void;
-}) {
-  const [method, setMethod] = useState("CASH");
-  const [paying, setPaying] = useState(false);
-
-  useEffect(() => {
-    if (open) setMethod("CASH");
-  }, [open]);
-
-  async function handlePay() {
-    if (!appointment) return;
-    setPaying(true);
-    try {
-      await apiFetch<{ payment: PaymentDTO; appointment: AppointmentDTO }>("/api/payments", {
-        method: "POST",
-        body: { appointmentId: appointment.id, method },
-      });
-      // Cash is settled at the counter, so do not claim it was received.
-      if (method === "CASH") {
-        toast.success(`Reserved — pay ${formatBDT(appointment.price)} at the front desk`);
-      } else {
-        toast.success("Payment successful 🎉");
-      }
-      onOpenChange(false);
-      onDone();
-    } catch (err) {
-      toast.error((err as Error).message);
-    } finally {
-      setPaying(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Pay for your appointment</DialogTitle>
-          <DialogDescription>
-            {appointment ? `${appointment.service.name} — ${formatBDT(appointment.price)}` : ""}
-          </DialogDescription>
-        </DialogHeader>
-        <RadioGroup value={method} onValueChange={setMethod} className="gap-3">
-          {PAYMENT_METHODS.map((pm) => (
-            <Label
-              key={pm.value}
-              htmlFor={`pay-${pm.value}`}
-              className={cn(
-                "flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border p-3 font-normal transition-colors",
-                method === pm.value ? "border-primary bg-primary/5" : "hover:bg-muted/50"
-              )}
-            >
-              <RadioGroupItem value={pm.value} id={`pay-${pm.value}`} />
-              {pm.label}
-            </Label>
-          ))}
-        </RadioGroup>
-        {method === "CASH" ? (
-          <p className="rounded-xl border border-orange-200 dark:border-orange-900 bg-orange-50 dark:bg-orange-950/40 px-3 py-2 text-xs text-orange-900 dark:text-orange-200">
-            Nothing is charged now. We will hold your appointment and you pay{" "}
-            {appointment ? formatBDT(appointment.price) : ""} in cash at the front desk.
-          </p>
-        ) : null}
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={paying} className="min-h-11">
-            Cancel
-          </Button>
-          <Button onClick={handlePay} disabled={paying} className="min-h-11">
-            {paying ? <Loader2 className="animate-spin" /> : <BadgeCheck />}
-            {method === "CASH"
-              ? "Reserve — pay at clinic"
-              : `Pay ${appointment ? formatBDT(appointment.price) : ""}`}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
 // ---------- Main booking flow ----------
 
 export function BookingFlow() {
@@ -446,7 +69,7 @@ export function BookingFlow() {
   const [serviceId, setServiceId] = useState<string | null>(null);
   const [petId, setPetId] = useState<string | null>(null);
   const [providerId, setProviderId] = useState<string | null>(null);
-  const [date, setDate] = useState(todayStr());
+  const [date, setDate] = useState(clinicToday());
   const [time, setTime] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
 
@@ -466,50 +89,67 @@ export function BookingFlow() {
   useEffect(() => {
     apiFetch<{ services: ServiceDTO[] }>("/api/services?active=true")
       .then((r) => setServices(r.services))
-      .catch((err: Error) => toast.error(err.message));
+      .catch((err) => toast.error(errMsg(err)));
   }, []);
 
   useEffect(() => {
     if (step !== 2) return;
     apiFetch<{ pets: PetDTO[] }>("/api/pets")
       .then((r) => setPets(r.pets))
-      .catch((err: Error) => toast.error(err.message));
+      .catch((err) => toast.error(errMsg(err)));
   }, [step, addPetOpen]);
 
+  // Keyed to the chosen service, not to entering step 3. Re-running on every
+  // step-3 entry wiped a provider the user had already picked, so Back → Next
+  // silently cleared the selection.
   useEffect(() => {
-    if (step !== 3 || !selectedService) return;
+    if (!selectedService) return;
     const specialty = selectedService.category === "GROOMING" ? "GROOMER" : "VET";
     setProviders(null);
     setProviderId(null);
-    apiFetch<{ providers: ProviderDTO[] }>(`/api/providers?specialty=${specialty}`)
+    const ac = new AbortController();
+    apiFetch<{ providers: ProviderDTO[] }>(`/api/providers?specialty=${specialty}`, {
+      signal: ac.signal,
+    })
       .then((r) => setProviders(r.providers))
-      .catch((err: Error) => toast.error(err.message));
-  }, [step, selectedService]);
+      .catch((err) => {
+        if (!isAbortError(err)) toast.error(errMsg(err));
+      });
+    return () => ac.abort();
+  }, [selectedService]);
 
   // serviceId lets the API hide slots that cannot fit this service before closing time.
-  const fetchSlots = useCallback(async (pid: string, d: string, sid: string) => {
+  const fetchSlots = useCallback(async (pid: string, d: string, sid: string, signal: AbortSignal) => {
     setSlotsLoading(true);
     try {
       const r = await apiFetch<{ slots: string[] }>(
         `/api/appointments/slots?providerId=${encodeURIComponent(pid)}&date=${encodeURIComponent(
           d
-        )}&serviceId=${encodeURIComponent(sid)}`
+        )}&serviceId=${encodeURIComponent(sid)}`,
+        { signal }
       );
       setSlots(r.slots);
     } catch (err) {
-      toast.error((err as Error).message);
+      // Switching date or provider abandons the in-flight request; a late
+      // reply for the old one must not paint over the new slot list.
+      if (isAbortError(err)) return;
+      toast.error(errMsg(err));
       setSlots([]);
     } finally {
-      setSlotsLoading(false);
+      if (!signal.aborted) setSlotsLoading(false);
     }
   }, []);
 
+  // Same reasoning: clear the time only when an input to the slot list actually
+  // changes, not merely because step 4 was entered again.
   useEffect(() => {
-    if (step !== 4 || !providerId || !date || !serviceId) return;
+    if (!providerId || !date || !serviceId) return;
     setTime(null);
     setSlots(null);
-    fetchSlots(providerId, date, serviceId);
-  }, [step, providerId, date, serviceId, fetchSlots]);
+    const ac = new AbortController();
+    void fetchSlots(providerId, date, serviceId, ac.signal);
+    return () => ac.abort();
+  }, [providerId, date, serviceId, fetchSlots]);
 
   const stepValid =
     (step === 1 && !!serviceId) ||
@@ -538,7 +178,7 @@ export function BookingFlow() {
       setBooked(res.appointment);
       toast.success("Appointment booked");
     } catch (err) {
-      toast.error((err as Error).message);
+      toast.error(errMsg(err));
     } finally {
       setSubmitting(false);
     }
@@ -691,7 +331,7 @@ export function BookingFlow() {
                         <div
                           className={cn(
                             "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-2xl shadow-sm",
-                            CATEGORY_TILE[svc.category] ?? CATEGORY_TILE.MEDICAL
+                            categoryTile(svc.category)
                           )}
                         >
                           {svc.icon}
@@ -856,10 +496,10 @@ export function BookingFlow() {
                 <Input
                   id="book-date"
                   type="date"
-                  min={todayStr()}
+                  min={clinicToday()}
                   value={date}
                   onChange={(e) => {
-                    setDate(e.target.value || todayStr());
+                    setDate(e.target.value || clinicToday());
                     setTime(null);
                   }}
                 />
@@ -911,7 +551,7 @@ export function BookingFlow() {
                   <div
                     className={cn(
                       "flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl text-3xl shadow-sm",
-                      CATEGORY_TILE[selectedService?.category ?? "MEDICAL"] ?? CATEGORY_TILE.MEDICAL
+                      categoryTile(selectedService?.category)
                     )}
                   >
                     {selectedService?.icon}
@@ -996,10 +636,12 @@ export function BookingFlow() {
         </div>
       </div>
 
-      <InlineAddPetDialog
+      <PetFormDialog
         open={addPetOpen}
         onOpenChange={setAddPetOpen}
-        onCreated={(pet) => {
+        idPrefix="book-pet"
+        successMessage={(pet) => `${pet.name} added`}
+        onSaved={(pet) => {
           setPets((prev) => (prev ? [...prev, pet] : [pet]));
           setPetId(pet.id);
         }}

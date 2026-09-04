@@ -22,6 +22,7 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  sessions             Session[]
   pets                 Pet[]
   customerAppointments Appointment[]  @relation("CustomerAppointments")
   providerAppointments Appointment[]  @relation("ProviderAppointments")
@@ -33,6 +34,29 @@ model User {
 
   @@index([role, active]) // provider lists, admin/staff role filters
   @@index([createdAt])
+}
+
+/**
+ * Server-side sessions. The bearer token used to be the user's own cuid, which
+ * meant any leaked id (they are returned by public endpoints) was a permanent
+ * master key for that account. Tokens are now random, expiring, revocable, and
+ * stored only as a hash so a database leak does not yield usable tokens.
+ */
+model Session {
+  id         String   @id @default(cuid())
+  /**
+   * sha256 of the token; the raw token is only ever returned to the client once.
+   */
+  tokenHash  String   @unique
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  lastUsedAt DateTime @default(now())
+  userAgent  String?
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Pet {

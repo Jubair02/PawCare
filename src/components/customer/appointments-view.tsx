@@ -41,126 +41,23 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, isAbortError } from "@/lib/api";
 import { ListNotice } from "@/components/shared/list-notice";
-import { PAYMENT_METHODS } from "@/lib/constants";
-import { dateRelation, formatBDT, formatDate, formatTime, petEmoji } from "@/lib/formatters";
+import { PaymentDialog } from "@/components/shared/payment-dialog";
+import { PAYMENT_METHODS, categoryTile } from "@/lib/constants";
+import { clinicToday, dateRelation, formatBDT, formatDate, formatTime, petEmoji } from "@/lib/formatters";
 import { useAppStore } from "@/lib/store";
-import type { AppointmentDTO, PageMeta } from "@/lib/types";
+import type { AppointmentDTO, ListCounts, PageMeta } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
 
-const CATEGORY_TILE: Record<string, string> = {
-  MEDICAL: "bg-gradient-to-br from-emerald-600 to-teal-500",
-  GROOMING: "bg-gradient-to-br from-amber-400 to-amber-500",
-  DIAGNOSTIC: "bg-gradient-to-br from-violet-500 to-violet-600",
-};
-
 type TabKey = "upcoming" | "completed" | "cancelled" | "all";
-
-function todayStr(): string {
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(
-    n.getDate()
-  ).padStart(2, "0")}`;
-}
 
 function isUpcoming(a: AppointmentDTO): boolean {
   return (
     dateRelation(a.date) !== "past" && a.status !== "CANCELLED" && a.status !== "COMPLETED"
-  );
-}
-
-// ---------- Pay now dialog ----------
-
-function PayDialog({
-  appointment,
-  open,
-  onOpenChange,
-  onDone,
-}: {
-  appointment: AppointmentDTO | null;
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  onDone: () => void;
-}) {
-  const [method, setMethod] = useState("CASH");
-  const [paying, setPaying] = useState(false);
-
-  useEffect(() => {
-    if (open) setMethod("CASH");
-  }, [open]);
-
-  async function handlePay() {
-    if (!appointment) return;
-    setPaying(true);
-    try {
-      await apiFetch<{ payment: unknown; appointment: AppointmentDTO }>("/api/payments", {
-        method: "POST",
-        body: { appointmentId: appointment.id, method },
-      });
-      // Cash is settled at the counter, so do not claim it was received.
-      if (method === "CASH") {
-        toast.success(`Reserved — pay ${formatBDT(appointment.price)} at the front desk`);
-      } else {
-        toast.success("Payment successful 🎉");
-      }
-      onOpenChange(false);
-      onDone();
-    } catch (err) {
-      toast.error((err as Error).message);
-    } finally {
-      setPaying(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Pay for your appointment</DialogTitle>
-          <DialogDescription>
-            {appointment
-              ? `${appointment.service.name} for ${appointment.pet.name} — ${formatBDT(appointment.price)}`
-              : ""}
-          </DialogDescription>
-        </DialogHeader>
-        <RadioGroup value={method} onValueChange={setMethod} className="gap-3">
-          {PAYMENT_METHODS.map((pm) => (
-            <Label
-              key={pm.value}
-              htmlFor={`appt-pay-${pm.value}`}
-              className={cn(
-                "flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border p-3 font-normal transition-colors",
-                method === pm.value ? "border-primary bg-primary/5" : "hover:bg-muted/50"
-              )}
-            >
-              <RadioGroupItem value={pm.value} id={`appt-pay-${pm.value}`} />
-              {pm.label}
-            </Label>
-          ))}
-        </RadioGroup>
-        {method === "CASH" ? (
-          <p className="rounded-xl border border-orange-200 dark:border-orange-900 bg-orange-50 dark:bg-orange-950/40 px-3 py-2 text-xs text-orange-900 dark:text-orange-200">
-            Nothing is charged now. We will hold your appointment and you pay{" "}
-            {appointment ? formatBDT(appointment.price) : ""} in cash at the front desk.
-          </p>
-        ) : null}
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={paying} className="min-h-11">
-            Cancel
-          </Button>
-          <Button onClick={handlePay} disabled={paying} className="min-h-11">
-            {paying ? <Loader2 className="animate-spin" /> : <BadgeCheck />}
-            {method === "CASH"
-              ? "Reserve — pay at clinic"
-              : `Pay ${appointment ? formatBDT(appointment.price) : ""}`}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -177,38 +74,51 @@ function RescheduleDialog({
   onOpenChange: (v: boolean) => void;
   onDone: () => void;
 }) {
-  const [date, setDate] = useState(todayStr());
+  const [date, setDate] = useState(clinicToday());
   const [time, setTime] = useState<string | null>(null);
   const [slots, setSlots] = useState<string[] | null>(null);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  const fetchSlots = useCallback(async (providerId: string, d: string) => {
-    setSlotsLoading(true);
-    try {
-      const r = await apiFetch<{ slots: string[] }>(
-        `/api/appointments/slots?providerId=${encodeURIComponent(providerId)}&date=${encodeURIComponent(d)}`
-      );
-      setSlots(r.slots);
-    } catch (err) {
-      toast.error((err as Error).message);
-      setSlots([]);
-    } finally {
-      setSlotsLoading(false);
-    }
-  }, []);
+  // serviceId is required: without it the API sizes slots to one grid step, so
+  // slots too short for this service are offered and then rejected on save.
+  const fetchSlots = useCallback(
+    async (providerId: string, d: string, serviceId: string, signal: AbortSignal) => {
+      setSlotsLoading(true);
+      try {
+        const r = await apiFetch<{ slots: string[] }>(
+          `/api/appointments/slots?providerId=${encodeURIComponent(providerId)}&date=${encodeURIComponent(
+            d
+          )}&serviceId=${encodeURIComponent(serviceId)}`,
+          { signal }
+        );
+        setSlots(r.slots);
+      } catch (err) {
+        // A superseded request must not report failure or blank the list the
+        // current date is loading into.
+        if (isAbortError(err)) return;
+        toast.error((err as Error).message);
+        setSlots([]);
+      } finally {
+        if (!signal.aborted) setSlotsLoading(false);
+      }
+    },
+    []
+  );
 
   // On open: seed date with the appointment's date (or today if past), reset time.
   useEffect(() => {
     if (!open || !appointment) return;
-    setDate(dateRelation(appointment.date) === "past" ? todayStr() : appointment.date);
+    setDate(dateRelation(appointment.date) === "past" ? clinicToday() : appointment.date);
     setTime(null);
   }, [open, appointment]);
 
   // Refetch slots whenever the dialog opens or the date changes.
   useEffect(() => {
     if (!open || !appointment || !date) return;
-    fetchSlots(appointment.provider.id, date);
+    const ac = new AbortController();
+    void fetchSlots(appointment.provider.id, date, appointment.service.id, ac.signal);
+    return () => ac.abort();
   }, [open, appointment, date, fetchSlots]);
 
   async function handleSave() {
@@ -246,10 +156,10 @@ function RescheduleDialog({
           <Input
             id="reschedule-date"
             type="date"
-            min={todayStr()}
+            min={clinicToday()}
             value={date}
             onChange={(e) => {
-              setDate(e.target.value || todayStr());
+              setDate(e.target.value || clinicToday());
               setTime(null);
             }}
           />
@@ -348,7 +258,8 @@ function ReviewDialog({
           comment: comment.trim() || undefined,
         },
       });
-      toast.success("Review submitted");
+      // POST /api/reviews stores the review as PENDING, so it is not public yet.
+      toast.success("Thanks! Your review goes live once the clinic approves it.");
       onOpenChange(false);
       onDone();
     } catch (err) {
@@ -403,6 +314,10 @@ function ReviewDialog({
               rows={3}
             />
           </div>
+          <p className="text-xs text-muted-foreground">
+            Reviews are checked by the clinic before they appear publicly. You can see the status of
+            yours under Reviews.
+          </p>
         </div>
 
         <DialogFooter>
@@ -447,7 +362,7 @@ function DetailsDialog({
               <div
                 className={cn(
                   "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-2xl shadow-sm",
-                  CATEGORY_TILE[a.service.category] ?? CATEGORY_TILE.MEDICAL
+                  categoryTile(a.service.category)
                 )}
               >
                 {a.service.icon}
@@ -553,7 +468,8 @@ function AppointmentCard({
   onReview: () => void;
   onDetails: () => void;
 }) {
-  const canPay = a.paymentStatus === "UNPAID" && a.status !== "CANCELLED" && a.status !== "COMPLETED";
+  // Paying after the visit is the common case; only cancellation blocks payment.
+  const canPay = a.paymentStatus === "UNPAID" && a.status !== "CANCELLED";
   const canCancel = a.status === "PENDING" || a.status === "CONFIRMED";
   const canReschedule = a.status === "PENDING";
   const canReview = a.status === "COMPLETED" && !a.review;
@@ -570,7 +486,7 @@ function AppointmentCard({
             <div
               className={cn(
                 "flex h-12 w-12 shrink-0 items-center justify-center rounded-xl text-2xl shadow-sm",
-                CATEGORY_TILE[a.service.category] ?? CATEGORY_TILE.MEDICAL
+                categoryTile(a.service.category)
               )}
             >
               {a.service.icon}
@@ -669,13 +585,19 @@ export function CustomerAppointmentsView() {
   const [detailsTarget, setDetailsTarget] = useState<AppointmentDTO | null>(null);
 
   const [page, setPage] = useState<PageMeta | null>(null);
+  const [serverCounts, setServerCounts] = useState<ListCounts | null>(null);
 
   const loadAppointments = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiFetch<{ appointments: AppointmentDTO[]; page?: PageMeta }>("/api/appointments");
+      const res = await apiFetch<{
+        appointments: AppointmentDTO[];
+        page?: PageMeta;
+        counts?: ListCounts;
+      }>("/api/appointments");
       setAppointments(res.appointments);
       setPage(res.page ?? null);
+      setServerCounts(res.counts ?? null);
     } catch (err) {
       toast.error((err as Error).message);
     } finally {
@@ -690,12 +612,16 @@ export function CustomerAppointmentsView() {
   const counts = useMemo(() => {
     const list = appointments ?? [];
     return {
-      upcoming: list.filter(isUpcoming).length,
-      completed: list.filter((a) => a.status === "COMPLETED").length,
-      cancelled: list.filter((a) => a.status === "CANCELLED").length,
-      all: list.length,
+      // Totals come from the server so they describe the whole history, not the
+      // slice currently in memory.
+      upcoming: serverCounts
+        ? (serverCounts.PENDING ?? 0) + (serverCounts.CONFIRMED ?? 0) + (serverCounts.CHECKED_IN ?? 0) + (serverCounts.IN_PROGRESS ?? 0)
+        : list.filter(isUpcoming).length,
+      completed: serverCounts?.COMPLETED ?? list.filter((a) => a.status === "COMPLETED").length,
+      cancelled: serverCounts?.CANCELLED ?? list.filter((a) => a.status === "CANCELLED").length,
+      all: serverCounts?.all ?? list.length,
     };
-  }, [appointments]);
+  }, [appointments, serverCounts]);
 
   const filtered = useMemo(() => {
     const list = appointments ?? [];
@@ -788,7 +714,7 @@ export function CustomerAppointmentsView() {
         />
       )}
 
-      <PayDialog
+      <PaymentDialog
         appointment={payTarget}
         open={!!payTarget}
         onOpenChange={(v) => !v && setPayTarget(null)}

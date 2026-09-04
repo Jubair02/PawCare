@@ -1,14 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { ChangeEvent } from "react";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
   Cake,
   CalendarDays,
   Droplet,
-  Loader2,
   Palette,
   PawPrint,
   Pencil,
@@ -19,56 +17,17 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import { apiFetch } from "@/lib/api";
-import { PET_TYPES, VACCINATION_STATUSES } from "@/lib/constants";
-import { formatDate, formatTime, petEmoji } from "@/lib/formatters";
+import { genderLabel, petTypeLabel } from "@/lib/constants";
+import { formatDate, formatTime, petAge, petEmoji } from "@/lib/formatters";
 import { useAppStore } from "@/lib/store";
 import type { PetDetailDTO } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/shared/empty-state";
-import { SectionHeader } from "@/components/shared/section-header";
+import { PetFormDialog } from "@/components/shared/pet-form-dialog";
 import { StatusBadge } from "@/components/shared/status-badge";
-
-const MAX_PHOTO_BYTES = 400 * 1024; // 400KB
-
-function ageLabel(birthDate?: string): string | null {
-  if (!birthDate) return null;
-  const [y, m, d] = birthDate.split("-").map(Number);
-  if (!y || !m || !d) return null;
-  const now = new Date();
-  const born = new Date(y, m - 1, d);
-  if (born.getTime() > now.getTime()) return null;
-  let months =
-    (now.getFullYear() - born.getFullYear()) * 12 + (now.getMonth() - born.getMonth());
-  if (now.getDate() < born.getDate()) months -= 1;
-  if (months < 0) months = 0;
-  const years = Math.floor(months / 12);
-  const rem = months % 12;
-  if (years === 0) return `${months} mo old`;
-  if (rem === 0) return `${years} yr old`;
-  return `${years} yr ${rem} mo old`;
-}
 
 function Chip({ icon, children }: { icon?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -76,232 +35,6 @@ function Chip({ icon, children }: { icon?: React.ReactNode; children: React.Reac
       {icon}
       {children}
     </span>
-  );
-}
-
-function EditPetDialog({
-  open,
-  onOpenChange,
-  pet,
-  onSaved,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  pet: PetDetailDTO | null;
-  onSaved: () => void;
-}) {
-  const [saving, setSaving] = useState(false);
-  const [name, setName] = useState("");
-  const [breed, setBreed] = useState("");
-  const [gender, setGender] = useState("MALE");
-  const [birthDate, setBirthDate] = useState("");
-  const [weight, setWeight] = useState("");
-  const [color, setColor] = useState("");
-  const [vaccinationStatus, setVaccinationStatus] = useState("NONE");
-  const [medicalNotes, setMedicalNotes] = useState("");
-  const [photo, setPhoto] = useState("");
-  const [nameError, setNameError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (open && pet) {
-      setName(pet.name);
-      setBreed(pet.breed ?? "");
-      setGender(pet.gender ?? "MALE");
-      setBirthDate(pet.birthDate ?? "");
-      setWeight(pet.weight !== undefined && pet.weight !== null ? String(pet.weight) : "");
-      setColor(pet.color ?? "");
-      setVaccinationStatus(pet.vaccinationStatus ?? "NONE");
-      setMedicalNotes(pet.medicalNotes ?? "");
-      setPhoto(pet.photo ?? "");
-      setNameError(null);
-    }
-  }, [open, pet]);
-
-  function handlePhoto(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      toast.error("Please choose an image file");
-      e.target.value = "";
-      return;
-    }
-    if (file.size > MAX_PHOTO_BYTES) {
-      toast.error("Image is too large — please pick one under 400KB");
-      e.target.value = "";
-      return;
-    }
-    const reader = new FileReader();
-    reader.onload = () => setPhoto(String(reader.result ?? ""));
-    reader.readAsDataURL(file);
-  }
-
-  async function handleSubmit() {
-    if (!name.trim()) {
-      setNameError("Pet name is required");
-      return;
-    }
-    if (!pet) return;
-    setSaving(true);
-    try {
-      await apiFetch<{ pet: PetDetailDTO }>(`/api/pets/${pet.id}`, {
-        method: "PATCH",
-        body: {
-          name: name.trim(),
-          breed: breed.trim() || undefined,
-          gender,
-          birthDate: birthDate || undefined,
-          weight: weight ? Number(weight) : undefined,
-          color: color.trim() || undefined,
-          vaccinationStatus,
-          medicalNotes: medicalNotes.trim() || undefined,
-          photo: photo || undefined,
-        },
-      });
-      toast.success("Pet profile updated");
-      onOpenChange(false);
-      onSaved();
-    } catch (err) {
-      toast.error((err as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto scrollbar-thin sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Edit {pet?.name}</DialogTitle>
-          <DialogDescription>Update your pet&apos;s profile details.</DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4">
-          <div className="grid gap-2">
-            <Label htmlFor="detail-pet-name">
-              Name <span className="text-destructive">*</span>
-            </Label>
-            <Input
-              id="detail-pet-name"
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value);
-                if (nameError) setNameError(null);
-              }}
-              aria-invalid={!!nameError}
-            />
-            {nameError ? <p className="text-xs text-destructive">{nameError}</p> : null}
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <Label htmlFor="detail-pet-breed">Breed</Label>
-              <Input id="detail-pet-breed" value={breed} onChange={(e) => setBreed(e.target.value)} />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="detail-pet-color">Color</Label>
-              <Input id="detail-pet-color" value={color} onChange={(e) => setColor(e.target.value)} />
-            </div>
-          </div>
-          <div className="grid gap-2">
-            <Label>Gender</Label>
-            <RadioGroup value={gender} onValueChange={setGender} className="flex gap-6">
-              <div className="flex items-center gap-2">
-                <RadioGroupItem value="MALE" id="detail-gender-male" />
-                <Label htmlFor="detail-gender-male" className="font-normal">
-                  Male
-                </Label>
-              </div>
-              <div className="flex items-center gap-2">
-                <RadioGroupItem value="FEMALE" id="detail-gender-female" />
-                <Label htmlFor="detail-gender-female" className="font-normal">
-                  Female
-                </Label>
-              </div>
-            </RadioGroup>
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="grid gap-2">
-              <Label htmlFor="detail-pet-birth">Birth date</Label>
-              <Input
-                id="detail-pet-birth"
-                type="date"
-                value={birthDate}
-                onChange={(e) => setBirthDate(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="detail-pet-weight">Weight (kg)</Label>
-              <Input
-                id="detail-pet-weight"
-                type="number"
-                min="0"
-                step="0.1"
-                value={weight}
-                onChange={(e) => setWeight(e.target.value)}
-              />
-            </div>
-          </div>
-          <div className="grid gap-2">
-            <Label>Vaccination status</Label>
-            <Select value={vaccinationStatus} onValueChange={setVaccinationStatus}>
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder="Select status" />
-              </SelectTrigger>
-              <SelectContent>
-                {VACCINATION_STATUSES.map((v) => (
-                  <SelectItem key={v.value} value={v.value}>
-                    {v.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="detail-pet-notes">Medical notes</Label>
-            <Textarea
-              id="detail-pet-notes"
-              value={medicalNotes}
-              onChange={(e) => setMedicalNotes(e.target.value)}
-              rows={3}
-            />
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="detail-pet-photo">Photo</Label>
-            <div className="flex items-center gap-3">
-              {photo ? (
-                 
-                <img
-                  src={photo}
-                  alt="Pet preview"
-                  loading="lazy"
-                  decoding="async"
-                  className="h-14 w-14 rounded-xl border object-cover"
-                />
-              ) : (
-                <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-primary/10 text-2xl">
-                  {pet ? petEmoji(pet.type) : "🐾"}
-                </div>
-              )}
-              <Input
-                id="detail-pet-photo"
-                type="file"
-                accept="image/*"
-                onChange={handlePhoto}
-                className="h-11"
-              />
-            </div>
-            <p className="text-xs text-muted-foreground">JPG or PNG, up to 400KB.</p>
-          </div>
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving} className="min-h-11">
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit} disabled={saving} className="min-h-11">
-            {saving ? <Loader2 className="animate-spin" /> : null}
-            Save changes
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -361,7 +94,7 @@ export function PetDetailView() {
     );
   }
 
-  const age = ageLabel(pet.birthDate);
+  const age = petAge(pet.birthDate);
 
   return (
     <div className="space-y-6">
@@ -399,11 +132,11 @@ export function PetDetailView() {
                 <StatusBadge status={pet.vaccinationStatus ?? "NONE"} />
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                <Chip>{petEmoji(pet.type)} {String(pet.type).replace(/_/g, " ")}</Chip>
+                <Chip>{petEmoji(pet.type)} {petTypeLabel(pet.type)}</Chip>
                 {pet.breed ? <Chip>{pet.breed}</Chip> : null}
                 {pet.gender ? (
                   <Chip icon={<User className="size-3.5" />}>
-                    {pet.gender === "MALE" ? "Male" : pet.gender === "FEMALE" ? "Female" : pet.gender}
+                    {genderLabel(pet.gender)}
                   </Chip>
                 ) : null}
                 {pet.birthDate ? (
@@ -561,7 +294,13 @@ export function PetDetailView() {
         </TabsContent>
       </Tabs>
 
-      <EditPetDialog open={editOpen} onOpenChange={setEditOpen} pet={pet} onSaved={loadPet} />
+      <PetFormDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        pet={pet}
+        onSaved={loadPet}
+        idPrefix="pet-detail"
+      />
     </div>
   );
 }

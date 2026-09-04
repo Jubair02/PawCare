@@ -6,7 +6,9 @@ import {
   allowedTransitions,
   asString,
   notify,
+  notifyRoles,
   readBody,
+  serializableWrite,
   shapeAppointment,
 } from "@/app/api/_lib/shape";
 
@@ -58,7 +60,29 @@ export async function PATCH(req: Request, ctx: Ctx) {
       throw new ApiError(`Invalid status transition from ${appointment.status} to ${target}.`, 400);
     }
 
-    await db.appointment.update({ where: { id }, data: { status: target } });
+    // Cancelling has to settle the money too. Previously only `status` moved, so
+    // a cancelled appointment kept its PAID/CASH_DUE badge and any uncollected
+    // cash record stayed PENDING forever.
+    let paidCount = 0;
+    if (target === "CANCELLED") {
+      paidCount = await serializableWrite(async (tx) => {
+        await tx.appointment.update({ where: { id }, data: { status: target } });
+        // Cash that was never handed over is void, not refundable.
+        await tx.payment.updateMany({
+          where: { appointmentId: id, status: "PENDING" },
+          data: { status: "CANCELLED" },
+        });
+        const paid = await tx.payment.count({ where: { appointmentId: id, status: "PAID" } });
+        // Money already taken stays PAID until an admin actually refunds it.
+        await tx.appointment.update({
+          where: { id },
+          data: { paymentStatus: paid > 0 ? "PAID" : "UNPAID" },
+        });
+        return paid;
+      });
+    } else {
+      await db.appointment.update({ where: { id }, data: { status: target } });
+    }
 
     // Notifications: customer always; provider when a customer cancels.
     const label = target.replace(/_/g, " ");
@@ -74,6 +98,17 @@ export async function PATCH(req: Request, ctx: Ctx) {
         "Appointment cancelled",
         `${appointment.customer.name} cancelled the ${appointment.service.name} appointment for ${appointment.pet.name} on ${appointment.date} at ${appointment.time}.`,
         "STATUS",
+      );
+    }
+
+    // A collected payment on a cancelled booking needs a deliberate human
+    // refund - surface it instead of letting it sit unnoticed.
+    if (paidCount > 0) {
+      await notifyRoles(
+        ["ADMIN"],
+        "Refund due",
+        `${appointment.customer.name}'s ${appointment.service.name} appointment for ${appointment.pet.name} on ${appointment.date} was cancelled after payment. Review the invoice and refund it.`,
+        "PAYMENT",
       );
     }
 

@@ -11,11 +11,13 @@ export async function GET(req: Request) {
       throw new ApiError("specialty must be VET or GROOMER.", 400);
     }
 
+    // Filter on `role`, which is what booking validates against. Filtering on the
+    // editable `specialty` column let the two disagree, so a provider could list
+    // themselves under a profession whose services they cannot be booked for.
     const providers = await db.user.findMany({
       where: {
         active: true,
-        role: { in: ["VET", "GROOMER"] },
-        ...(specialty ? { specialty } : {}),
+        role: specialty ? specialty : { in: ["VET", "GROOMER"] },
       },
       orderBy: { name: "asc" },
     });

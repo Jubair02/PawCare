@@ -18,6 +18,7 @@ import {
 import {
   BarChart3,
   CalendarCheck,
+  Download,
   PercentCircle,
   RefreshCw,
   TrendingUp,
@@ -38,21 +39,12 @@ import {
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
+import { ChartCard, ChartTip, STATUS_COLORS, compactMoney } from "@/components/admin/chart-kit";
 import { apiFetch } from "@/lib/api";
-import { formatBDT } from "@/lib/formatters";
+import { clinicToday, formatBDT } from "@/lib/formatters";
 import type { AdminOverviewData } from "@/lib/types";
 
 /* ------------------------------- chart bits ------------------------------- */
-
-/** Exact status colors per CONTRACT (matches admin-dashboard; no blue/indigo anywhere). */
-const STATUS_COLORS: Record<string, string> = {
-  PENDING: "var(--status-pending)",
-  CONFIRMED: "var(--status-confirmed)",
-  CHECKED_IN: "var(--status-checked-in)",
-  IN_PROGRESS: "var(--status-in-progress)",
-  COMPLETED: "var(--status-completed)",
-  CANCELLED: "var(--status-cancelled)",
-};
 
 /** Donut palette for service popularity (contract order). */
 const DONUT_PALETTE = [
@@ -62,57 +54,6 @@ const DONUT_PALETTE = [
   "var(--chart-4)",
   "var(--chart-5)",
 ];
-
-interface TipEntry {
-  name?: string | number;
-  value?: number | string;
-  color?: string;
-}
-
-/** White card tooltip: border + shadow + rounded (same design as admin-dashboard). */
-function ChartTip({
-  active,
-  payload,
-  label,
-  money,
-}: {
-  active?: boolean;
-  payload?: TipEntry[];
-  label?: string | number;
-  money?: boolean;
-}) {
-  if (!active || !payload || payload.length === 0) return null;
-  return (
-    <div className="min-w-32 rounded-xl border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
-      {label !== undefined && label !== "" ? (
-        <p className="mb-1 font-semibold text-foreground">{label}</p>
-      ) : null}
-      {payload.map((entry, i) => (
-        <div key={i} className="flex items-center gap-2 py-0.5">
-          <span className="size-2 shrink-0 rounded-full" style={{ background: entry.color ?? "var(--chart-1)" }} />
-          <span className="text-muted-foreground">{entry.name}</span>
-          <span className="ml-auto pl-3 font-semibold text-stone-800 dark:text-stone-200">
-            {money ? formatBDT(Number(entry.value) || 0) : String(entry.value)}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const compactMoney = (v: number) => (Math.abs(v) >= 1000 ? `৳${Number((v / 1000).toFixed(1))}k` : `৳${v}`);
-
-function ChartCard({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
-  return (
-    <Card className="rounded-2xl p-4 sm:p-6">
-      <div className="mb-4">
-        <p className="font-semibold">{title}</p>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </div>
-      {children}
-    </Card>
-  );
-}
 
 /* --------------------------------- view ----------------------------------- */
 
@@ -173,12 +114,19 @@ export function AdminReportsView() {
   /* ------------------------------ derived KPIs ------------------------------ */
 
   const bookings6mo = data.appointmentsByMonth.reduce((sum, m) => sum + m.count, 0);
-  const statusTotal = data.statusDistribution.reduce((sum, s) => sum + s.count, 0);
+  // Revenue over the same six months the bookings cover. Mixing this with the
+  // all-time figure made "avg booking value" and the table total meaningless.
+  const revenue6mo = data.revenueByMonth.reduce((sum, m) => sum + m.amount, 0);
+
   const cancelled = data.statusDistribution.find((s) => s.status === "CANCELLED")?.count ?? 0;
   const completed = data.statusDistribution.find((s) => s.status === "COMPLETED")?.count ?? 0;
-  const cancelRate = statusTotal > 0 ? Math.round((cancelled / statusTotal) * 100) : 0;
-  const completeRate = statusTotal > 0 ? Math.round((completed / statusTotal) * 100) : 0;
-  const avgBookingValue = bookings6mo > 0 ? Math.round(data.totalRevenue / bookings6mo) : 0;
+  // Rates are over appointments that actually reached an outcome. Including
+  // PENDING and CONFIRMED bookings — visits that simply have not happened yet —
+  // dragged both percentages down and made them drift with the booking calendar.
+  const concluded = completed + cancelled;
+  const cancelRate = concluded > 0 ? Math.round((cancelled / concluded) * 100) : 0;
+  const completeRate = concluded > 0 ? Math.round((completed / concluded) * 100) : 0;
+  const avgBookingValue = bookings6mo > 0 ? Math.round(revenue6mo / bookings6mo) : 0;
 
   /* ------------------------------ derived charts ---------------------------- */
 
@@ -194,9 +142,40 @@ export function AdminReportsView() {
 
   const revenueByMonthMap = new Map(data.revenueByMonth.map((m) => [m.month, m.amount]));
 
+  // Captured here so the export closure does not depend on the nullable state.
+  const monthlyRows = data.appointmentsByMonth;
+
+  /** Month-by-month bookings and revenue, for handing to an accountant. */
+  function exportCsv() {
+    const rows = [
+      ["Month", "Bookings", "Revenue (BDT)"],
+      ...monthlyRows.map((m) => [
+        m.month,
+        String(m.count),
+        String(revenueByMonthMap.get(m.month) ?? 0),
+      ]),
+      ["Total", String(bookings6mo), String(revenue6mo)],
+    ];
+    // Quote every cell so a comma in a label cannot shift the columns.
+    const csv = rows.map((r) => r.map((c) => `"${c.replace(/"/g, '""')}"`).join(",")).join("\r\n");
+
+    const url = URL.createObjectURL(new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" }));
+    const link = document.createElement("a");
+    link.href = url;
+    // clinicToday(), not toISOString(): a report exported at 2 AM in Dhaka was
+    // named with the previous day's date.
+    link.download = `pawcare-report-${clinicToday()}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="space-y-6">
       <SectionHeader title="Reports" description="Operational insights — revenue, bookings and service performance.">
+        <Button variant="outline" onClick={exportCsv} disabled={loading} className="min-h-10">
+          <Download className="size-4" />
+          Export CSV
+        </Button>
         <Button variant="outline" onClick={() => setTick((t) => t + 1)} disabled={loading} className="min-h-10">
           <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} />
           Refresh
@@ -205,11 +184,11 @@ export function AdminReportsView() {
 
       {/* Insight KPI row */}
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-5">
-        <StatCard title="Revenue" value={formatBDT(data.totalRevenue)} icon={<Wallet />} tone="default" hint="Collected to date" />
+        <StatCard title="Revenue" value={formatBDT(data.totalRevenue)} icon={<Wallet />} tone="default" hint="Collected, all time" />
         <StatCard title="Bookings" value={bookings6mo} icon={<CalendarCheck />} tone="teal" hint="Last 6 months" />
-        <StatCard title="Avg booking value" value={formatBDT(avgBookingValue)} icon={<TrendingUp />} tone="amber" hint="Revenue ÷ bookings" />
-        <StatCard title="Cancellation rate" value={`${cancelRate}%`} icon={<PercentCircle />} tone="rose" hint={`${cancelled} of ${statusTotal} appointments`} />
-        <StatCard title="Completion rate" value={`${completeRate}%`} icon={<PercentCircle />} tone="violet" hint={`${completed} of ${statusTotal} appointments`} />
+        <StatCard title="Avg booking value" value={formatBDT(avgBookingValue)} icon={<TrendingUp />} tone="amber" hint="Last 6 months" />
+        <StatCard title="Cancellation rate" value={`${cancelRate}%`} icon={<PercentCircle />} tone="rose" hint={`${cancelled} of ${concluded} concluded`} />
+        <StatCard title="Completion rate" value={`${completeRate}%`} icon={<PercentCircle />} tone="violet" hint={`${completed} of ${concluded} concluded`} />
       </div>
 
       {/* Charts */}
@@ -363,7 +342,7 @@ export function AdminReportsView() {
               <TableRow className="bg-muted/40">
                 <TableCell className="font-semibold">Total</TableCell>
                 <TableCell className="text-center font-semibold">{bookings6mo}</TableCell>
-                <TableCell className="text-right font-semibold">{formatBDT(data.totalRevenue)}</TableCell>
+                <TableCell className="text-right font-semibold">{formatBDT(revenue6mo)}</TableCell>
               </TableRow>
             </TableBody>
           </Table>

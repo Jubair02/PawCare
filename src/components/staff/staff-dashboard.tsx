@@ -23,14 +23,10 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, errMsg } from "@/lib/api";
 import { formatBDT, formatTime, petEmoji } from "@/lib/formatters";
 import { useAppStore } from "@/lib/store";
 import type { AppointmentDTO, StaffDashboardData } from "@/lib/types";
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : "Something went wrong";
-}
 
 export function StaffDashboard() {
   const setView = useAppStore((s) => s.setView);

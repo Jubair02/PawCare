@@ -17,21 +17,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { apiFetch } from "@/lib/api";
-import { formatBDT, formatDate, formatTime, petEmoji } from "@/lib/formatters";
+import { DetailRow } from "@/components/shared/detail-row";
+import { apiFetch, errMsg } from "@/lib/api";
+import { clinicToday, formatBDT, formatDate, formatTime, petEmoji, toISODate } from "@/lib/formatters";
 import type { AppointmentDTO } from "@/lib/types";
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : "Something went wrong";
-}
-
-function toISODate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-function todayStr(): string {
-  return toISODate(new Date());
-}
 
 /** Monday of the week containing the given yyyy-MM-dd. */
 function weekStartOf(iso: string): string {
@@ -73,24 +62,15 @@ function statusBorder(status: string): string {
   }
 }
 
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-baseline justify-between gap-2 border-b py-2 last:border-b-0">
-      <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
-      <span className="text-right text-sm font-medium">{children}</span>
-    </div>
-  );
-}
-
 export function VetScheduleView() {
-  const [anchor, setAnchor] = useState<string>(() => todayStr());
+  const [anchor, setAnchor] = useState<string>(() => clinicToday());
   const [appointments, setAppointments] = useState<AppointmentDTO[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<AppointmentDTO | null>(null);
 
   const weekStart = weekStartOf(anchor);
   const weekEnd = addDays(weekStart, 6);
-  const today = todayStr();
+  const today = clinicToday();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -147,7 +127,7 @@ export function VetScheduleView() {
           <Button
             variant="outline"
             className="h-11 rounded-xl px-4 text-sm sm:h-9"
-            onClick={() => setAnchor(todayStr())}
+            onClick={() => setAnchor(clinicToday())}
           >
             This week
           </Button>
@@ -174,6 +154,14 @@ export function VetScheduleView() {
             <Skeleton key={i} className="h-44 rounded-2xl" />
           ))}
         </div>
+      ) : appointments.length === 0 ? (
+        /* Seven "No sessions" columns say nothing the empty state does not, so
+           the week grid gives way to it entirely. */
+        <EmptyState
+          icon={<CalendarDays />}
+          title="Nothing booked this week"
+          description="Use the arrows to browse other weeks — new bookings will show up here."
+        />
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-7">
           {days.map((day, idx) => {
@@ -235,15 +223,6 @@ export function VetScheduleView() {
           })}
         </div>
       )}
-
-      {/* Week is entirely empty */}
-      {!loading && appointments.length === 0 ? (
-        <EmptyState
-          icon={<CalendarDays />}
-          title="Nothing booked this week"
-          description="Use the arrows to browse other weeks — new bookings will show up here."
-        />
-      ) : null}
 
       {/* Appointment details */}
       <Dialog open={selected !== null} onOpenChange={(v) => !v && setSelected(null)}>

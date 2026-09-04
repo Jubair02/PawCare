@@ -22,14 +22,10 @@ import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { apiFetch } from "@/lib/api";
-import { formatDate, formatTime, petEmoji } from "@/lib/formatters";
+import { clinicToday, formatDate, formatTime, petEmoji } from "@/lib/formatters";
+import { PROVIDER_RECORDS_LABEL } from "@/lib/constants";
 import { useAppStore } from "@/lib/store";
 import type { AppointmentDTO, ProviderDashboardData } from "@/lib/types";
-
-function todayStr(): string {
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
-}
 
 function lastName(name?: string): string {
   if (!name) return "";
@@ -70,7 +66,7 @@ export function VetDashboard() {
     { view: "vet-schedule", label: "Schedule", icon: CalendarClock, desc: "Week planner" },
     {
       view: "vet-treatments",
-      label: isVet ? "Treatments" : "Records",
+      label: isVet ? PROVIDER_RECORDS_LABEL.VET : PROVIDER_RECORDS_LABEL.GROOMER,
       icon: isVet ? Stethoscope : Scissors,
       desc: isVet ? "Medical notes" : "Grooming logs",
     },
@@ -87,7 +83,7 @@ export function VetDashboard() {
       >
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <p className="text-sm font-medium opacity-90">{formatDate(todayStr())}</p>
+            <p className="text-sm font-medium opacity-90">{formatDate(clinicToday())}</p>
             <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">
               Good day, {displayName || "there"}
             </h1>

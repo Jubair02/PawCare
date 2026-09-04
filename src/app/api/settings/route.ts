@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { ApiError, handleError, json, requireRole } from "@/lib/auth";
-import { EMAIL_RE, TIME_RE, asNumber, asString, getSetting, readBody, timeToMinutes } from "@/app/api/_lib/shape";
+import { EMAIL_RE, MAX_LEN, TIME_RE, asBoundedString, asNumber, asString, getSetting, readBody, timeToMinutes } from "@/app/api/_lib/shape";
 
 export const dynamic = "force-dynamic";
 
@@ -30,16 +30,16 @@ export async function PATCH(req: Request) {
       slotMinutes?: number;
     } = {};
 
-    const clinicName = asString(body.clinicName);
+    const clinicName = asBoundedString(body.clinicName, MAX_LEN.NAME, "Clinic name");
     if (clinicName !== undefined) {
       if (!clinicName) throw new ApiError("Clinic name cannot be empty.", 400);
       data.clinicName = clinicName;
     }
-    const address = asString(body.address);
+    const address = asBoundedString(body.address, MAX_LEN.NOTES, "Address");
     if (address !== undefined) data.address = address;
-    const phone = asString(body.phone);
+    const phone = asBoundedString(body.phone, MAX_LEN.PHONE, "Phone");
     if (phone !== undefined) data.phone = phone;
-    const email = asString(body.email);
+    const email = asBoundedString(body.email, MAX_LEN.EMAIL, "Email");
     if (email !== undefined) {
       if (!EMAIL_RE.test(email)) throw new ApiError("A valid clinic email is required.", 400);
       data.email = email;

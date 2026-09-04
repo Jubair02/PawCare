@@ -1,18 +1,6 @@
 import { db } from "@/lib/db";
 import { ApiError, handleError, json, requireUser } from "@/lib/auth";
-import {
-  APPOINTMENT_INCLUDE,
-  DATE_RE,
-  TIME_RE,
-  asString,
-  assertBookable,
-  assertNoOverlap,
-  getSetting,
-  notify,
-  readBody,
-  serializableWrite,
-  shapeAppointment,
-} from "@/app/api/_lib/shape";
+import { APPOINTMENT_INCLUDE, DATE_RE, MAX_LEN, TIME_RE, asBoundedString, asString, assertBookable, assertNoOverlap, getSetting, notify, readBody, serializableWrite, shapeAppointment } from "@/app/api/_lib/shape";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -66,7 +54,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     const body = await readBody(req);
     const date = asString(body.date);
     const time = asString(body.time);
-    const notes = asString(body.notes);
+    const notes = asBoundedString(body.notes, MAX_LEN.NOTES, "Notes");
 
     if (date !== undefined && !DATE_RE.test(date)) throw new ApiError("Invalid date format. Use yyyy-MM-dd.", 400);
     if (time !== undefined && !TIME_RE.test(time)) throw new ApiError("Invalid time format. Use HH:mm.", 400);

@@ -1,7 +1,9 @@
 import { db } from "@/lib/db";
 import { ApiError, handleError, json, publicUser, requireRole } from "@/lib/auth";
 import { hashPassword } from "@/lib/password";
-import { ROLES, asBoolean, asString, notify, readBody } from "@/app/api/_lib/shape";
+import { isValidSpecialtyForRole } from "@/lib/domain";
+import { revokeAllSessions } from "@/lib/session";
+import { MAX_LEN, ROLES, asBoolean, asBoundedString, asString, notify, readBody } from "@/app/api/_lib/shape";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -25,31 +27,43 @@ export async function PATCH(req: Request, ctx: Ctx) {
       password?: string;
     } = {};
 
-    const name = asString(body.name);
+    const name = asBoundedString(body.name, MAX_LEN.NAME, "Name");
     if (name !== undefined) {
       if (!name) throw new ApiError("Name cannot be empty.", 400);
       data.name = name;
     }
-    const phone = asString(body.phone);
+    const phone = asBoundedString(body.phone, MAX_LEN.PHONE, "Phone");
     if (phone !== undefined) data.phone = phone;
     const role = asString(body.role);
     if (role !== undefined) {
       if (!ROLES.includes(role)) throw new ApiError("Invalid role value.", 400);
       data.role = role;
     }
-    const specialty = asString(body.specialty);
-    if (specialty !== undefined) data.specialty = specialty;
+    const specialty = asBoundedString(body.specialty, MAX_LEN.SHORT, "Specialty");
+    const effectiveRole = role ?? target.role;
+    if (specialty !== undefined) {
+      // Validate against the role being saved, not the stale one.
+      if (!isValidSpecialtyForRole(effectiveRole, specialty)) {
+        throw new ApiError(`A ${effectiveRole} cannot have the specialty "${specialty}".`, 400);
+      }
+      data.specialty = specialty;
+    }
+    // Demoting a VET/GROOMER to a non-provider role must not leave the old
+    // specialty behind, whatever the client sent (or omitted).
+    if (effectiveRole !== "VET" && effectiveRole !== "GROOMER") {
+      data.specialty = "";
+    }
     const active = asBoolean(body.active);
     if (active !== undefined) data.active = active;
-    const bio = asString(body.bio);
+    const bio = asBoundedString(body.bio, MAX_LEN.BIO, "Bio");
     if (bio !== undefined) data.bio = bio;
 
     // Account recovery: forgot-password is a stub with no mailer, so an admin
     // resetting the password is the supported way back into a locked-out account.
-    const password = asString(body.password);
+    const password = asBoundedString(body.password, MAX_LEN.PASSWORD, "Password");
     if (password !== undefined) {
       if (password.length < 6) throw new ApiError("Password must be at least 6 characters.", 400);
-      data.password = hashPassword(password);
+      data.password = await hashPassword(password);
     }
 
     // Lockout guards. DELETE already blocks self-deletion; without these an admin
@@ -76,6 +90,12 @@ export async function PATCH(req: Request, ctx: Ctx) {
     }
 
     const updated = await db.user.update({ where: { id }, data });
+
+    // An admin reset, a demotion or a deactivation must invalidate the target's
+    // existing sessions, otherwise the old token keeps working.
+    if (data.password || data.role !== undefined || active === false) {
+      await revokeAllSessions(updated.id);
+    }
 
     if (data.password) {
       await notify(

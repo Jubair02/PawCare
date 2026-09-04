@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { resolveSession } from "@/lib/session";
 import type { User } from "@prisma/client";
 
 export class ApiError extends Error {
@@ -9,13 +9,25 @@ export class ApiError extends Error {
   }
 }
 
-/** Reads `Authorization: Bearer <userId>` header (demo-grade token = user id). */
-export async function getAuthUser(req: Request): Promise<User | null> {
+/** Extracts the raw bearer token, or null. */
+export function bearerToken(req: Request): string | null {
   const header = req.headers.get("authorization") || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7).trim() : null;
+  if (!header.startsWith("Bearer ")) return null;
+  const token = header.slice(7).trim();
+  return token === "" ? null : token;
+}
+
+/**
+ * Resolves the caller from their session token.
+ *
+ * This used to look the token up as a *user id*, so any id leaked by a public
+ * endpoint authenticated as that user permanently. Tokens are now random,
+ * expiring session handles that can be revoked.
+ */
+export async function getAuthUser(req: Request): Promise<User | null> {
+  const token = bearerToken(req);
   if (!token) return null;
-  const user = await db.user.findUnique({ where: { id: token } });
-  return user && user.active ? user : null;
+  return resolveSession(token);
 }
 
 export async function requireUser(req: Request): Promise<User> {

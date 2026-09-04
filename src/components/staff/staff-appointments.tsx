@@ -13,7 +13,9 @@ import {
   LogIn,
   Play,
   Receipt,
+  PawPrint,
   Search,
+  UserPlus,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -33,6 +35,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -56,13 +59,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { AppointmentDetailsDialog } from "@/components/shared/appointment-details-dialog";
 import { EmptyState } from "@/components/shared/empty-state";
+import { PetFormDialog } from "@/components/shared/pet-form-dialog";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, errMsg } from "@/lib/api";
 import { ListNotice } from "@/components/shared/list-notice";
 import { PAYMENT_METHODS } from "@/lib/constants";
 import {
+  clinicToday,
   formatBDT,
   formatDate,
   formatDateShort,
@@ -74,104 +80,6 @@ import { cn } from "@/lib/utils";
 import type { AppointmentDTO, PageMeta, PaymentMethod, PetDTO, ProviderDTO, ServiceDTO, UserDTO } from "@/lib/types";
 
 const STATUS_OPTIONS = ["PENDING", "CONFIRMED", "CHECKED_IN", "IN_PROGRESS", "COMPLETED", "CANCELLED"];
-
-function todayStr(): string {
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
-}
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : "Something went wrong";
-}
-
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-baseline justify-between gap-2 border-b py-2 last:border-b-0">
-      <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
-      <span className="text-right text-sm font-medium">{children}</span>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Details dialog                                                      */
-/* ------------------------------------------------------------------ */
-
-function DetailsDialog({
-  appointment,
-  open,
-  onOpenChange,
-  actions,
-  busy,
-}: {
-  appointment: AppointmentDTO | null;
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-  actions?: React.ReactNode;
-  busy?: boolean;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto scrollbar-thin sm:max-w-lg">
-        {appointment ? (
-          <>
-            <DialogHeader>
-              <DialogTitle className="flex flex-wrap items-center gap-2">
-                <span className="text-lg">{appointment.service.icon}</span>
-                {appointment.service.name}
-              </DialogTitle>
-              <DialogDescription>
-                {formatDate(appointment.date)} at {formatTime(appointment.time)} ·{" "}
-                {formatBDT(appointment.price)}
-              </DialogDescription>
-            </DialogHeader>
-            <div>
-              <DetailRow label="Status">
-                <span className="inline-flex flex-wrap justify-end gap-1.5">
-                  <StatusBadge status={appointment.status} />
-                  <StatusBadge status={appointment.paymentStatus} />
-                </span>
-              </DetailRow>
-              <DetailRow label="Customer">
-                <span>
-                  {appointment.customer.name}
-                  {appointment.customer.phone ? (
-                    <span className="block text-xs font-normal text-muted-foreground">
-                      {appointment.customer.phone}
-                    </span>
-                  ) : null}
-                  <span className="block text-xs font-normal text-muted-foreground">
-                    {appointment.customer.email}
-                  </span>
-                </span>
-              </DetailRow>
-              <DetailRow label="Pet">
-                {petEmoji(appointment.pet.type)} {appointment.pet.name}
-                {appointment.pet.breed ? ` · ${appointment.pet.breed}` : ""}
-              </DetailRow>
-              <DetailRow label="Provider">{appointment.provider.name}</DetailRow>
-              <DetailRow label="Duration">{appointment.service.duration} min</DetailRow>
-              <DetailRow label="Price">{formatBDT(appointment.price)}</DetailRow>
-              {appointment.notes ? (
-                <DetailRow label="Notes">
-                  <span className="block max-w-xs whitespace-pre-wrap text-left text-sm font-normal text-muted-foreground">
-                    {appointment.notes}
-                  </span>
-                </DetailRow>
-              ) : null}
-            </div>
-            {actions ? <div className="flex flex-wrap justify-end gap-2">{actions}</div> : null}
-          </>
-        ) : null}
-        {busy ? (
-          <div className="absolute inset-0 grid place-items-center rounded-lg bg-background/60">
-            <Loader2 className="size-6 animate-spin text-primary" />
-          </div>
-        ) : null}
-      </DialogContent>
-    </Dialog>
-  );
-}
 
 /* ------------------------------------------------------------------ */
 /* Create wizard dialog                                                */
@@ -211,12 +119,17 @@ function CreateAppointmentDialog({
   const [provider, setProvider] = useState<ProviderDTO | null>(null);
 
   // (d) date + slot + notes
-  const [date, setDate] = useState<string>(todayStr());
+  const [date, setDate] = useState<string>(clinicToday());
   const [slots, setSlots] = useState<string[]>([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [time, setTime] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
+  // Walk-in escape hatches: the wizard used to dead-end when the customer had
+  // no pet on file, or was not registered at all.
+  const [addPetOpen, setAddPetOpen] = useState(false);
+  const [newCustomerOpen, setNewCustomerOpen] = useState(false);
 
   // Debounce the customer search (300ms)
   useEffect(() => {
@@ -310,11 +223,13 @@ function CreateAppointmentDialog({
 
   // Load slots for the chosen provider + date (step 4)
   useEffect(() => {
-    if (step !== 4 || !provider || !date) return;
+    if (step !== 4 || !provider || !date || !service) return;
     let cancelled = false;
     setSlotsLoading(true);
     setTime("");
-    apiFetch<{ slots: string[] }>(`/api/appointments/slots?providerId=${provider.id}&date=${date}`)
+    apiFetch<{ slots: string[] }>(
+      `/api/appointments/slots?providerId=${provider.id}&date=${date}&serviceId=${service.id}`
+    )
       .then((res) => {
         if (!cancelled) setSlots(res.slots);
       })
@@ -330,12 +245,26 @@ function CreateAppointmentDialog({
     return () => {
       cancelled = true;
     };
-  }, [step, provider, date]);
+  }, [step, provider, date, service]);
 
   const canNext =
     (step === 1 && customer !== null) ||
     (step === 2 && pet !== null) ||
     (step === 3 && service !== null && provider !== null);
+
+  /** A pet just registered for this customer: list it and pre-select it. */
+  function handlePetCreated(created: PetDTO) {
+    setPets((prev) => [created, ...prev.filter((x) => x.id !== created.id)]);
+    setPet(created);
+  }
+
+  /** A walk-in customer just registered: select them and move to their pet. */
+  function handleCustomerCreated(created: UserDTO) {
+    setCustomers((prev) => [created, ...prev.filter((x) => x.id !== created.id)]);
+    setCustomer(created);
+    setPet(null);
+    setStep(2);
+  }
 
   async function submit() {
     if (!customer || !pet || !service || !provider || !date || !time) return;
@@ -364,308 +293,492 @@ function CreateAppointmentDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto scrollbar-thin sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <CalendarPlus className="size-5 text-primary" />
-            New appointment
-          </DialogTitle>
-          <DialogDescription>Book on behalf of a customer, step by step.</DialogDescription>
-        </DialogHeader>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto scrollbar-thin sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarPlus className="size-5 text-primary" />
+              New appointment
+            </DialogTitle>
+            <DialogDescription>Book on behalf of a customer, step by step.</DialogDescription>
+          </DialogHeader>
 
-        {/* Step indicator */}
-        <div className="flex items-start gap-1" aria-label={`Step ${step} of 4`}>
-          {WIZARD_STEPS.map((label, i) => {
-            const n = i + 1;
-            const done = step > n;
-            const active = step === n;
-            return (
-              <div key={label} className="flex flex-1 flex-col items-center gap-1">
-                <div
-                  className={cn(
-                    "flex size-8 items-center justify-center rounded-full text-xs font-bold",
-                    active && "bg-primary text-primary-foreground",
-                    done && "bg-primary/15 text-primary",
-                    !active && !done && "bg-muted text-muted-foreground"
-                  )}
-                >
-                  {done ? <Check className="size-4" /> : n}
+          {/* Step indicator */}
+          {/* A bare div takes no accessible name, so the label needs a role to
+              hang off — otherwise screen readers announce nothing here. */}
+          <div className="flex items-start gap-1" role="group" aria-label={`Step ${step} of 4`}>
+            {WIZARD_STEPS.map((label, i) => {
+              const n = i + 1;
+              const done = step > n;
+              const active = step === n;
+              return (
+                <div key={label} className="flex flex-1 flex-col items-center gap-1">
+                  <div
+                    className={cn(
+                      "flex size-8 items-center justify-center rounded-full text-xs font-bold",
+                      active && "bg-primary text-primary-foreground",
+                      done && "bg-primary/15 text-primary",
+                      !active && !done && "bg-muted text-muted-foreground"
+                    )}
+                  >
+                    {done ? <Check className="size-4" /> : n}
+                  </div>
+                  <span
+                    className={cn(
+                      "text-[10px] sm:text-xs",
+                      active ? "font-semibold text-foreground" : "text-muted-foreground"
+                    )}
+                  >
+                    {label}
+                  </span>
                 </div>
-                <span
-                  className={cn(
-                    "text-[10px] sm:text-xs",
-                    active ? "font-semibold text-foreground" : "text-muted-foreground"
-                  )}
+              );
+            })}
+          </div>
+
+          {/* Step 1 — customer */}
+          {step === 1 ? (
+            <div className="grid gap-3">
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={customerQuery}
+                    onChange={(e) => setCustomerQuery(e.target.value)}
+                    placeholder="Search customers by name or email…"
+                    className="pl-9"
+                    aria-label="Search customers"
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  className="min-h-11 shrink-0 sm:min-h-9"
+                  onClick={() => setNewCustomerOpen(true)}
                 >
-                  {label}
-                </span>
+                  <UserPlus className="size-4" /> New customer
+                </Button>
               </div>
-            );
-          })}
-        </div>
-
-        {/* Step 1 — customer */}
-        {step === 1 ? (
-          <div className="grid gap-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={customerQuery}
-                onChange={(e) => setCustomerQuery(e.target.value)}
-                placeholder="Search customers by name or email…"
-                className="pl-9"
-                aria-label="Search customers"
-              />
-            </div>
-            {customersLoading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-14 rounded-xl" />
-                ))}
-              </div>
-            ) : customers.length === 0 ? (
-              <p className="rounded-xl border border-dashed py-6 text-center text-sm text-muted-foreground">
-                No customers found.
-              </p>
-            ) : (
-              <div className="max-h-96 space-y-1.5 overflow-y-auto pr-1 scrollbar-thin">
-                {customers.map((u) => (
-                  <button
-                    key={u.id}
-                    onClick={() => {
-                      setCustomer(u);
-                      setPet(null);
-                      setStep(2);
-                    }}
-                    className={cn(
-                      "flex min-h-14 w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-colors hover:border-primary/40 hover:bg-primary/5",
-                      customer?.id === u.id && "border-primary bg-primary/5"
-                    )}
-                  >
-                    <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                      {initials(u.name)}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold">{u.name}</span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {u.email}
-                        {u.phone ? ` · ${u.phone}` : ""}
-                      </span>
-                    </span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {u._count?.pets ?? 0} pet{(u._count?.pets ?? 0) === 1 ? "" : "s"}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : null}
-
-        {/* Step 2 — pet */}
-        {step === 2 && customer ? (
-          <div className="grid gap-3">
-            <p className="text-sm text-muted-foreground">
-              Pick <span className="font-semibold text-foreground">{customer.name}</span>&apos;s pet.
-            </p>
-            {petsLoading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 2 }).map((_, i) => (
-                  <Skeleton key={i} className="h-14 rounded-xl" />
-                ))}
-              </div>
-            ) : pets.length === 0 ? (
-              <p className="rounded-xl border border-dashed bg-amber-50/60 px-4 py-6 text-center text-sm text-amber-800 dark:text-amber-200">
-                This customer has no pets — they must add one first.
-              </p>
-            ) : (
-              <div className="max-h-96 space-y-1.5 overflow-y-auto pr-1 scrollbar-thin">
-                {pets.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => setPet(p)}
-                    className={cn(
-                      "flex min-h-14 w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-colors hover:border-primary/40 hover:bg-primary/5",
-                      pet?.id === p.id && "border-primary bg-primary/5"
-                    )}
-                  >
-                    <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-lg">
-                      {petEmoji(p.type)}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold">{p.name}</span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {p.breed ?? "—"}
-                      </span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : null}
-
-        {/* Step 3 — service + provider */}
-        {step === 3 ? (
-          <div className="grid gap-3">
-            <p className="text-sm font-semibold">Service</p>
-            {servicesLoading ? (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <Skeleton key={i} className="h-20 rounded-xl" />
-                ))}
-              </div>
-            ) : (
-              <div className="grid max-h-56 grid-cols-1 gap-2 overflow-y-auto pr-1 scrollbar-thin sm:grid-cols-2">
-                {services.map((s) => (
-                  <button
-                    key={s.id}
-                    onClick={() => setService(s)}
-                    className={cn(
-                      "rounded-xl border p-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/5",
-                      service?.id === s.id && "border-primary bg-primary/5"
-                    )}
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="text-base">{s.icon}</span>
-                      <span className="min-w-0 flex-1 truncate text-sm font-semibold">{s.name}</span>
-                    </span>
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      {formatBDT(s.price)} · {s.duration} min · {s.category.toLowerCase()}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <p className="text-sm font-semibold">Provider</p>
-            {!service ? (
-              <p className="rounded-xl border border-dashed py-4 text-center text-sm text-muted-foreground">
-                Pick a service first — the provider list follows its category.
-              </p>
-            ) : providersLoading ? (
-              <div className="space-y-2">
-                {Array.from({ length: 2 }).map((_, i) => (
-                  <Skeleton key={i} className="h-14 rounded-xl" />
-                ))}
-              </div>
-            ) : providers.length === 0 ? (
-              <p className="rounded-xl border border-dashed py-4 text-center text-sm text-muted-foreground">
-                No active {service.category === "GROOMING" ? "groomers" : "vets"} available.
-              </p>
-            ) : (
-              <div className="max-h-56 space-y-1.5 overflow-y-auto pr-1 scrollbar-thin">
-                {providers.map((p) => (
-                  <button
-                    key={p.id}
-                    onClick={() => setProvider(p)}
-                    className={cn(
-                      "flex min-h-14 w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-colors hover:border-primary/40 hover:bg-primary/5",
-                      provider?.id === p.id && "border-primary bg-primary/5"
-                    )}
-                  >
-                    <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                      {initials(p.name)}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold">{p.name}</span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {p.specialty === "GROOMER" ? "Groomer" : "Veterinarian"}
-                        {p.rating ? ` · ★ ${p.rating}` : ""}
-                      </span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : null}
-
-        {/* Step 4 — date + slot + notes */}
-        {step === 4 && provider ? (
-          <div className="grid gap-3">
-            <div className="grid gap-2">
-              <Label htmlFor="appt-date">Date</Label>
-              <Input
-                id="appt-date"
-                type="date"
-                value={date}
-                min={todayStr()}
-                onChange={(e) => setDate(e.target.value)}
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label>Available slots</Label>
-              {slotsLoading ? (
-                <div className="flex flex-wrap gap-2">
-                  {Array.from({ length: 6 }).map((_, i) => (
-                    <Skeleton key={i} className="h-9 w-24 rounded-lg" />
+              {customersLoading ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <Skeleton key={i} className="h-14 rounded-xl" />
                   ))}
                 </div>
-              ) : slots.length === 0 ? (
-                <p className="rounded-xl border border-dashed py-4 text-center text-sm text-muted-foreground">
-                  No free slots on this day — try another date.
-                </p>
+              ) : customers.length === 0 ? (
+                <div className="rounded-xl border border-dashed px-4 py-6 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    {customerDebounced
+                      ? `No customer matches “${customerDebounced}”.`
+                      : "No customers on file yet."}
+                  </p>
+                  <Button variant="outline" className="mt-3 min-h-10" onClick={() => setNewCustomerOpen(true)}>
+                    <UserPlus className="size-4" /> Register a new customer
+                  </Button>
+                </div>
               ) : (
-                <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto scrollbar-thin">
-                  {slots.map((s) => (
+                <div className="max-h-96 space-y-1.5 overflow-y-auto pr-1 scrollbar-thin">
+                  {customers.map((u) => (
                     <button
-                      key={s}
-                      onClick={() => setTime(s)}
+                      key={u.id}
+                      onClick={() => {
+                        setCustomer(u);
+                        setPet(null);
+                        setStep(2);
+                      }}
                       className={cn(
-                        "min-h-9 rounded-lg border px-3 font-mono text-xs font-semibold transition-colors hover:border-primary/40 hover:bg-primary/5",
-                        time === s && "border-primary bg-primary text-primary-foreground hover:bg-primary"
+                        "flex min-h-14 w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-colors hover:border-primary/40 hover:bg-primary/5",
+                        customer?.id === u.id && "border-primary bg-primary/5"
                       )}
                     >
-                      {formatTime(s)}
+                      <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                        {initials(u.name)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold">{u.name}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {u.email}
+                          {u.phone ? ` · ${u.phone}` : ""}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {u._count?.pets ?? 0} pet{(u._count?.pets ?? 0) === 1 ? "" : "s"}
+                      </span>
                     </button>
                   ))}
                 </div>
               )}
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="appt-notes">Notes (optional)</Label>
-              <Textarea
-                id="appt-notes"
-                rows={2}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Anything the provider should know"
-              />
-            </div>
-          </div>
-        ) : null}
+          ) : null}
 
-        {/* Wizard footer */}
-        <div className="flex items-center justify-between gap-2">
-          <Button
-            variant="outline"
-            className="min-h-11 sm:min-h-9"
-            onClick={() => setStep((s) => Math.max(1, s - 1))}
-            disabled={step === 1 || submitting}
-          >
-            Back
-          </Button>
-          {step < 4 ? (
+          {/* Step 2 — pet */}
+          {step === 2 && customer ? (
+            <div className="grid gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-muted-foreground">
+                  Pick <span className="font-semibold text-foreground">{customer.name}</span>&apos;s pet.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="min-h-10 sm:min-h-9"
+                  onClick={() => setAddPetOpen(true)}
+                >
+                  <PawPrint className="size-4" /> Add a pet
+                </Button>
+              </div>
+              {petsLoading ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 2 }).map((_, i) => (
+                    <Skeleton key={i} className="h-14 rounded-xl" />
+                  ))}
+                </div>
+              ) : pets.length === 0 ? (
+                <div className="rounded-xl border border-dashed px-4 py-6 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    {customer.name} has no pets on file yet.
+                  </p>
+                  <Button variant="outline" className="mt-3 min-h-10" onClick={() => setAddPetOpen(true)}>
+                    <PawPrint className="size-4" /> Register their pet
+                  </Button>
+                </div>
+              ) : (
+                <div className="max-h-96 space-y-1.5 overflow-y-auto pr-1 scrollbar-thin">
+                  {pets.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => setPet(p)}
+                      className={cn(
+                        "flex min-h-14 w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-colors hover:border-primary/40 hover:bg-primary/5",
+                        pet?.id === p.id && "border-primary bg-primary/5"
+                      )}
+                    >
+                      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-muted text-lg">
+                        {petEmoji(p.type)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold">{p.name}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {p.breed ?? "—"}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {/* Step 3 — service + provider */}
+          {step === 3 ? (
+            <div className="grid gap-3">
+              <p className="text-sm font-semibold">Service</p>
+              {servicesLoading ? (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <Skeleton key={i} className="h-20 rounded-xl" />
+                  ))}
+                </div>
+              ) : (
+                <div className="grid max-h-56 grid-cols-1 gap-2 overflow-y-auto pr-1 scrollbar-thin sm:grid-cols-2">
+                  {services.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => setService(s)}
+                      className={cn(
+                        "rounded-xl border p-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/5",
+                        service?.id === s.id && "border-primary bg-primary/5"
+                      )}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className="text-base">{s.icon}</span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-semibold">{s.name}</span>
+                      </span>
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        {formatBDT(s.price)} · {s.duration} min · {s.category.toLowerCase()}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <p className="text-sm font-semibold">Provider</p>
+              {!service ? (
+                <p className="rounded-xl border border-dashed py-4 text-center text-sm text-muted-foreground">
+                  Pick a service first — the provider list follows its category.
+                </p>
+              ) : providersLoading ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 2 }).map((_, i) => (
+                    <Skeleton key={i} className="h-14 rounded-xl" />
+                  ))}
+                </div>
+              ) : providers.length === 0 ? (
+                <p className="rounded-xl border border-dashed py-4 text-center text-sm text-muted-foreground">
+                  No active {service.category === "GROOMING" ? "groomers" : "vets"} available.
+                </p>
+              ) : (
+                <div className="max-h-56 space-y-1.5 overflow-y-auto pr-1 scrollbar-thin">
+                  {providers.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => setProvider(p)}
+                      className={cn(
+                        "flex min-h-14 w-full items-center gap-3 rounded-xl border p-2.5 text-left transition-colors hover:border-primary/40 hover:bg-primary/5",
+                        provider?.id === p.id && "border-primary bg-primary/5"
+                      )}
+                    >
+                      <span className="grid size-9 shrink-0 place-items-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                        {initials(p.name)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-semibold">{p.name}</span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {p.specialty === "GROOMER" ? "Groomer" : "Veterinarian"}
+                          {p.rating ? ` · ★ ${p.rating}` : ""}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {/* Step 4 — date + slot + notes */}
+          {step === 4 && provider ? (
+            <div className="grid gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="appt-date">Date</Label>
+                <Input
+                  id="appt-date"
+                  type="date"
+                  value={date}
+                  min={clinicToday()}
+                  onChange={(e) => setDate(e.target.value)}
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label>Available slots</Label>
+                {slotsLoading ? (
+                  <div className="flex flex-wrap gap-2">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <Skeleton key={i} className="h-9 w-24 rounded-lg" />
+                    ))}
+                  </div>
+                ) : slots.length === 0 ? (
+                  <p className="rounded-xl border border-dashed py-4 text-center text-sm text-muted-foreground">
+                    No free slots on this day — try another date.
+                  </p>
+                ) : (
+                  <div className="flex max-h-40 flex-wrap gap-2 overflow-y-auto scrollbar-thin">
+                    {slots.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setTime(s)}
+                        className={cn(
+                          "min-h-9 rounded-lg border px-3 font-mono text-xs font-semibold transition-colors hover:border-primary/40 hover:bg-primary/5",
+                          time === s && "border-primary bg-primary text-primary-foreground hover:bg-primary"
+                        )}
+                      >
+                        {formatTime(s)}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="appt-notes">Notes (optional)</Label>
+                <Textarea
+                  id="appt-notes"
+                  rows={2}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Anything the provider should know"
+                />
+              </div>
+            </div>
+          ) : null}
+
+          {/* Wizard footer */}
+          <div className="flex items-center justify-between gap-2">
             <Button
+              variant="outline"
               className="min-h-11 sm:min-h-9"
-              disabled={!canNext}
-              onClick={() => setStep((s) => Math.min(4, s + 1))}
+              onClick={() => setStep((s) => Math.max(1, s - 1))}
+              disabled={step === 1 || submitting}
             >
-              Next
+              Back
             </Button>
-          ) : (
-            <Button
-              className="min-h-11 sm:min-h-9"
-              disabled={!time || submitting}
-              onClick={() => void submit()}
-            >
-              {submitting ? <Loader2 className="size-4 animate-spin" /> : <CalendarPlus className="size-4" />}
-              Create appointment
-            </Button>
-          )}
+            {step < 4 ? (
+              <Button
+                className="min-h-11 sm:min-h-9"
+                disabled={!canNext}
+                onClick={() => setStep((s) => Math.min(4, s + 1))}
+              >
+                Next
+              </Button>
+            ) : (
+              <Button
+                className="min-h-11 sm:min-h-9"
+                disabled={!time || submitting}
+                onClick={() => void submit()}
+              >
+                {submitting ? <Loader2 className="size-4 animate-spin" /> : <CalendarPlus className="size-4" />}
+                Create appointment
+              </Button>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Mounted outside the wizard's content so the two dialogs stack cleanly */}
+      {customer ? (
+        <PetFormDialog
+          open={addPetOpen}
+          onOpenChange={setAddPetOpen}
+          ownerId={customer.id}
+          ownerName={customer.name}
+          idPrefix="staff-new-pet"
+          onSaved={handlePetCreated}
+        />
+      ) : null}
+      <NewCustomerDialog
+        open={newCustomerOpen}
+        onOpenChange={setNewCustomerOpen}
+        onCreated={handleCustomerCreated}
+      />
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* New customer dialog (walk-ins with no account)                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Front-desk registration for someone who has never booked before.
+ *
+ * `POST /api/users` accepts STAFF only for the CUSTOMER role, so this cannot
+ * create a colleague or a provider. The temporary password is handed to the
+ * customer, who can change it from their profile.
+ */
+function NewCustomerDialog({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onCreated: (user: UserDTO) => void;
+}) {
+  const [form, setForm] = useState({ name: "", email: "", phone: "", password: "" });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) setForm({ name: "", email: "", phone: "", password: "" });
+  }, [open]);
+
+  async function save() {
+    if (!form.name.trim()) {
+      toast.error("The customer's name is required.");
+      return;
+    }
+    if (!form.email.trim()) {
+      toast.error("An email address is required — it is how they sign in.");
+      return;
+    }
+    if (form.password.length < 6) {
+      toast.error("The temporary password must be at least 6 characters.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await apiFetch<{ user: UserDTO }>("/api/users", {
+        method: "POST",
+        body: {
+          name: form.name.trim(),
+          email: form.email.trim(),
+          role: "CUSTOMER",
+          password: form.password,
+          ...(form.phone.trim() ? { phone: form.phone.trim() } : {}),
+        },
+      });
+      toast.success(`${res.user.name} registered`);
+      onOpenChange(false);
+      onCreated(res.user);
+    } catch (e) {
+      toast.error(errMsg(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto scrollbar-thin sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserPlus className="size-5 text-primary" />
+            Register a customer
+          </DialogTitle>
+          <DialogDescription>
+            Opens a file for a walk-in so you can book them straight away.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="grid gap-3">
+          <div className="grid gap-2">
+            <Label htmlFor="nc-name">Full name</Label>
+            <Input
+              id="nc-name"
+              value={form.name}
+              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder="Rahim Uddin"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="nc-email">Email</Label>
+            <Input
+              id="nc-email"
+              type="email"
+              value={form.email}
+              onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+              placeholder="rahim@example.com"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="nc-phone">Phone (optional)</Label>
+            <Input
+              id="nc-phone"
+              value={form.phone}
+              onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+              placeholder="01712345678"
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="nc-password">Temporary password</Label>
+            <Input
+              id="nc-password"
+              value={form.password}
+              onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+              placeholder="At least 6 characters"
+            />
+            <p className="text-xs text-muted-foreground">
+              Give this to the customer — they can change it from their profile.
+            </p>
+          </div>
         </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={() => void save()} disabled={saving} className="min-w-32">
+            {saving ? <Loader2 className="size-4 animate-spin" /> : <UserPlus className="size-4" />}
+            Register
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -694,7 +807,7 @@ function RescheduleDialog({
     let cancelled = false;
     setSlotsLoading(true);
     apiFetch<{ slots: string[] }>(
-      `/api/appointments/slots?providerId=${appointment.provider.id}&date=${date}`
+      `/api/appointments/slots?providerId=${appointment.provider.id}&date=${date}&serviceId=${appointment.service.id}`
     )
       .then((res) => {
         if (!cancelled) setSlots(res.slots);
@@ -749,7 +862,7 @@ function RescheduleDialog({
               id="rs-date"
               type="date"
               value={date}
-              min={todayStr()}
+              min={clinicToday()}
               onChange={(e) => {
                 setDate(e.target.value);
                 setTime("");
@@ -844,7 +957,8 @@ function PaymentDialog({
           </DialogTitle>
           <DialogDescription>
             {appointment.service.icon} {appointment.service.name} for {appointment.pet.name} ·{" "}
-            {formatBDT(appointment.price)}
+            {formatBDT(appointment.price)}. Records money already received and marks the
+            invoice paid.
           </DialogDescription>
         </DialogHeader>
 
@@ -988,7 +1102,7 @@ export function StaffAppointmentsView() {
         <Button
           size={size}
           variant="outline"
-          className="border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:bg-rose-950/40 hover:text-rose-700 dark:text-rose-200"
+          className="border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-700 dark:hover:text-rose-200"
           disabled={disabled}
           onClick={(e) => {
             e.stopPropagation();
@@ -1020,7 +1134,7 @@ export function StaffAppointmentsView() {
         <Button
           size={size}
           variant="outline"
-          className="border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:bg-rose-950/40 hover:text-rose-700 dark:text-rose-200"
+          className="border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-700 dark:hover:text-rose-200"
           disabled={disabled}
           onClick={(e) => {
             e.stopPropagation();
@@ -1052,7 +1166,7 @@ export function StaffAppointmentsView() {
         <Button
           size={size}
           variant="outline"
-          className="border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:bg-rose-950/40 hover:text-rose-700 dark:text-rose-200"
+          className="border-rose-200 dark:border-rose-900 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-700 dark:hover:text-rose-200"
           disabled={disabled}
           onClick={(e) => {
             e.stopPropagation();
@@ -1080,7 +1194,8 @@ export function StaffAppointmentsView() {
         </Button>
       );
     }
-    if (a.paymentStatus === "UNPAID" && a.status !== "CANCELLED" && a.status !== "COMPLETED") {
+    // Settling up after the appointment is the most common front-desk action.
+    if (a.paymentStatus === "UNPAID" && a.status !== "CANCELLED") {
       push(
         "pay",
         <Button
@@ -1198,8 +1313,20 @@ export function StaffAppointmentsView() {
                 {filtered.map((a) => (
                   <TableRow
                     key={a.id}
-                    className="cursor-pointer"
+                    role="button"
+                    tabIndex={0}
+                    className="cursor-pointer focus-visible:ring-2 focus-visible:ring-primary"
                     onClick={() => openDetails(a)}
+                    onKeyDown={(e) => {
+                      // The actions cell holds real buttons; Enter/Space there
+                      // must activate the button, not also open the dialog.
+                      if (e.target !== e.currentTarget) return;
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        openDetails(a);
+                      }
+                    }}
+                    aria-label={`Open details for ${a.service.name} — ${a.pet.name}, ${a.customer.name}`}
                   >
                     <TableCell>
                       <span className="block font-medium">{formatDateShort(a.date)}</span>
@@ -1269,7 +1396,22 @@ export function StaffAppointmentsView() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.2 }}
               >
-                <Card className="cursor-pointer p-4" onClick={() => openDetails(a)}>
+                <Card
+                  role="button"
+                  tabIndex={0}
+                  className="cursor-pointer p-4 focus-visible:ring-2 focus-visible:ring-primary"
+                  onClick={() => openDetails(a)}
+                  onKeyDown={(e) => {
+                    // Enter/Space on a nested action button must not also open
+                    // the details dialog, so only the card itself reacts.
+                    if (e.target !== e.currentTarget) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openDetails(a);
+                    }
+                  }}
+                  aria-label={`Open details for ${a.service.name} — ${a.pet.name}, ${a.customer.name}`}
+                >
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-3">
                       <div className="flex shrink-0 flex-col items-center rounded-xl bg-primary/10 px-3 py-2">
@@ -1325,12 +1467,13 @@ export function StaffAppointmentsView() {
       ) : null}
 
       {/* Details */}
-      <DetailsDialog
+      <AppointmentDetailsDialog
         appointment={details}
         open={detailsOpen}
         onOpenChange={setDetailsOpen}
         busy={busyId !== null}
         actions={details ? actionButtons(details, "default") : null}
+        showPrice
       />
 
       {/* Reschedule */}

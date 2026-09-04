@@ -17,6 +17,7 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiFetch } from "@/lib/api";
 import { ListNotice } from "@/components/shared/list-notice";
+import { useAppStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { timeAgo } from "@/lib/formatters";
 import type { NotificationDTO, NotificationsResponse, PageMeta } from "@/lib/types";
@@ -48,6 +49,8 @@ export function NotificationsView() {
   const [markingId, setMarkingId] = useState<string | null>(null);
 
   const [page, setPage] = useState<PageMeta | null>(null);
+  const revision = useAppStore((s) => s.notificationsRevision);
+  const notificationsChanged = useAppStore((s) => s.notificationsChanged);
 
   const load = useCallback(async () => {
     try {
@@ -64,7 +67,8 @@ export function NotificationsView() {
 
   useEffect(() => {
     void load();
-  }, [load]);
+    // Reload when the shell's bell popover marks something read behind this page.
+  }, [load, revision]);
 
   async function markAllRead() {
     setMarkingAll(true);
@@ -72,6 +76,7 @@ export function NotificationsView() {
       await apiFetch<{ ok: boolean }>("/api/notifications/read", { method: "POST", body: { all: true } });
       setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
       setUnread(0);
+      notificationsChanged();
       toast.success("All notifications marked as read");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to mark notifications read");
@@ -90,6 +95,7 @@ export function NotificationsView() {
       });
       setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
       setUnread((u) => Math.max(0, u - 1));
+      notificationsChanged();
     } catch {
       // silent — reading should not nag the user with errors
     } finally {

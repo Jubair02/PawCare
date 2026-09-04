@@ -19,46 +19,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { apiFetch } from "@/lib/api";
+import { DetailRow } from "@/components/shared/detail-row";
+import { apiFetch, errMsg } from "@/lib/api";
 import { ListNotice } from "@/components/shared/list-notice";
-import { PET_TYPES } from "@/lib/constants";
-import { formatDate, petEmoji } from "@/lib/formatters";
+import { genderLabel, petTypeLabel } from "@/lib/constants";
+import { formatDate, petAge, petEmoji } from "@/lib/formatters";
 import { useAppStore } from "@/lib/store";
 import type { PageMeta, PetDTO, TreatmentDTO } from "@/lib/types";
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : "Something went wrong";
-}
-
-function typeLabel(type: string): string {
-  return PET_TYPES.find((t) => t.value === type)?.label ?? type;
-}
-
-/** "2021-03-14" → "4 yrs 2 mos" (best-effort, blank when missing) */
-function ageFromBirthDate(birthDate?: string): string {
-  if (!birthDate) return "";
-  const [y, m, d] = birthDate.split("-").map(Number);
-  if (!y || !m || !d) return "";
-  const birth = new Date(y, m - 1, d);
-  const now = new Date();
-  let months = (now.getFullYear() - birth.getFullYear()) * 12 + (now.getMonth() - birth.getMonth());
-  if (now.getDate() < birth.getDate()) months -= 1;
-  if (months < 0) return "Newborn";
-  const years = Math.floor(months / 12);
-  const rem = months % 12;
-  if (years === 0) return `${months} mo${months === 1 ? "" : "s"}`;
-  if (rem === 0) return `${years} yr${years === 1 ? "" : "s"}`;
-  return `${years} yr${years === 1 ? "" : "s"} ${rem} mo${rem === 1 ? "" : "s"}`;
-}
-
-function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-baseline justify-between gap-2 border-b py-2 last:border-b-0">
-      <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
-      <span className="text-right text-sm font-medium">{children}</span>
-    </div>
-  );
-}
 
 export function VetPatientsView() {
   const user = useAppStore((s) => s.user);
@@ -200,7 +167,7 @@ export function VetPatientsView() {
                     <div className="flex items-center gap-2">
                       <p className="truncate font-semibold">{p.name}</p>
                       <Badge variant="outline" className="shrink-0 border-primary/30 text-primary">
-                        {typeLabel(p.type)}
+                        {petTypeLabel(p.type)}
                       </Badge>
                     </div>
                     <p className="truncate text-sm text-muted-foreground">{p.breed ?? "—"}</p>
@@ -233,14 +200,14 @@ export function VetPatientsView() {
                 </DialogTitle>
                 <DialogDescription>
                   {selected.breed ? `${selected.breed} · ` : ""}
-                  {typeLabel(selected.type)} · Owner {selected.owner?.name ?? "Unknown"}
+                  {petTypeLabel(selected.type)} · Owner {selected.owner?.name ?? "Unknown"}
                 </DialogDescription>
               </DialogHeader>
 
               <div>
-                <DetailRow label="Gender">{selected.gender ?? "—"}</DetailRow>
+                <DetailRow label="Gender">{genderLabel(selected.gender)}</DetailRow>
                 <DetailRow label="Age">
-                  {ageFromBirthDate(selected.birthDate ?? undefined) || "—"}
+                  {petAge(selected.birthDate) ?? "—"}
                   {selected.birthDate ? (
                     <span className="block text-xs font-normal text-muted-foreground">
                       Born {formatDate(selected.birthDate)}

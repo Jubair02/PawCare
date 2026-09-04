@@ -1,5 +1,6 @@
 import nextCoreWebVitals from "eslint-config-next/core-web-vitals";
 import nextTypescript from "eslint-config-next/typescript";
+import reactHooks from "eslint-plugin-react-hooks";
 import { dirname } from "path";
 import { fileURLToPath } from "url";
 
@@ -7,6 +8,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
+  // Registered explicitly: flat config requires the plugin to be defined in the
+  // same config object as any rule that references it, and the spread configs
+  // above do not reliably re-export it.
+  plugins: { "react-hooks": reactHooks },
   rules: {
     // TypeScript rules
     "@typescript-eslint/no-explicit-any": "off",
@@ -53,7 +58,19 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "no-useless-escape": "off",
   },
 }, {
-  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills"]
+  ignores: [
+    "node_modules/**",
+    ".next/**",
+    "out/**",
+    "build/**",
+    "next-env.d.ts",
+    "examples/**",
+    "skills",
+    // Vendored tooling, not project source.
+    ".claude/**",
+    ".zscripts/**",
+    "scripts/**",
+  ]
 }];
 
 export default eslintConfig;

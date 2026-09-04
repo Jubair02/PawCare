@@ -17,14 +17,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, errMsg, isAbortError } from "@/lib/api";
 import { ListNotice } from "@/components/shared/list-notice";
 import { formatDateShort, formatTime, initials, petEmoji, timeAgo } from "@/lib/formatters";
 import type { AppointmentDTO, PageMeta, PetDTO, UserDTO } from "@/lib/types";
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : "Something went wrong";
-}
 
 export function StaffCustomersView() {
   const [users, setUsers] = useState<UserDTO[]>([]);
@@ -44,22 +40,33 @@ export function StaffCustomersView() {
 
   const [page, setPage] = useState<PageMeta | null>(null);
 
-  const load = useCallback(async () => {
-    try {
-      const params = new URLSearchParams({ role: "CUSTOMER" });
-      if (debouncedQ) params.set("q", debouncedQ);
-      const res = await apiFetch<{ users: UserDTO[]; page?: PageMeta }>(`/api/users?${params.toString()}`);
-      setUsers(res.users);
-      setPage(res.page ?? null);
-    } catch (e) {
-      toast.error(errMsg(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [debouncedQ]);
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      try {
+        const params = new URLSearchParams({ role: "CUSTOMER" });
+        if (debouncedQ) params.set("q", debouncedQ);
+        const res = await apiFetch<{ users: UserDTO[]; page?: PageMeta }>(
+          `/api/users?${params.toString()}`,
+          { signal }
+        );
+        setUsers(res.users);
+        setPage(res.page ?? null);
+      } catch (e) {
+        if (isAbortError(e)) return;
+        toast.error(errMsg(e));
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [debouncedQ]
+  );
 
+  // Aborting on cleanup keeps a slow result for an earlier search term from
+  // landing after the newer one and replacing the list the user is reading.
   useEffect(() => {
-    void load();
+    const ac = new AbortController();
+    void load(ac.signal);
+    return () => ac.abort();
   }, [load]);
 
   // Detail data for the selected customer (pets + their appointments)

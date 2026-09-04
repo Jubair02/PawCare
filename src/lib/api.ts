@@ -3,6 +3,8 @@ import { useAppStore } from "./store";
 interface ApiFetchOptions {
   method?: string;
   body?: unknown;
+  /** Abort signal. Rejects with an AbortError — test it with `isAbortError`. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -11,6 +13,7 @@ interface ApiFetchOptions {
  * - Adds `Authorization: Bearer <token>` from the persisted zustand store.
  * - JSON-stringifies `body` when provided.
  * - Throws `Error(data.error || "Request failed")` on !ok responses.
+ * - Forwards `signal`, so a superseded request can be abandoned.
  * - Clears the persisted session on a 401 so a dead token cannot loop forever.
  */
 export async function apiFetch<T>(path: string, options?: ApiFetchOptions): Promise<T> {
@@ -24,6 +27,7 @@ export async function apiFetch<T>(path: string, options?: ApiFetchOptions): Prom
     headers,
     body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
     cache: "no-store",
+    signal: options?.signal,
   });
 
   let data: unknown = null;
@@ -48,4 +52,44 @@ export async function apiFetch<T>(path: string, options?: ApiFetchOptions): Prom
   }
 
   return data as T;
+}
+
+/**
+ * True when a rejection came from an aborted request rather than a real failure.
+ *
+ * A cancelled fetch is an expected outcome — the caller moved on — so it must
+ * not toast an error or clobber state the newer request is about to fill.
+ *
+ * WHEN A VIEW NEEDS AN ABORT GUARD
+ *
+ * The test is whether a *server-side* parameter drives the refetch, not simply
+ * whether the component fetches. A guard earns its keep only where request N
+ * can still be in flight when request N+1 is issued, so a stale response can
+ * land last and overwrite fresher data.
+ *
+ * Needs one: a debounced `?q=` search, a status/date filter passed to the API,
+ * an availability lookup keyed on the chosen date. Any list whose `load()`
+ * takes arguments that change as the user types or picks.
+ *
+ * Does not: a `[]`-dependency `load()` called on mount and after mutations,
+ * whose filtering happens client-side over the already-loaded list. There is no
+ * superseded-response window to protect, and adding a controller there is dead
+ * code that reads like a fix. A manual Refresh button is also fine unguarded —
+ * nothing supersedes it.
+ *
+ * This distinction has already produced one false-positive "missing guard"
+ * report, so it is written down rather than re-derived.
+ */
+export function isAbortError(e: unknown): boolean {
+  return e instanceof DOMException ? e.name === "AbortError" : (e as Error | null)?.name === "AbortError";
+}
+
+/**
+ * Message from a thrown error, for `toast.error(...)`.
+ *
+ * `apiFetch` rejects with `Error(data.error)`, so this is the standard way to
+ * surface a server message. Replaces ten identical local `errMsg` copies.
+ */
+export function errMsg(e: unknown): string {
+  return e instanceof Error ? e.message : "Something went wrong";
 }

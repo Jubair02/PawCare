@@ -1,23 +1,7 @@
 import { db } from "@/lib/db";
 import { ApiError, handleError, json, requireRole, requireUser } from "@/lib/auth";
 import type { Prisma } from "@prisma/client";
-import {
-  APPOINTMENT_INCLUDE,
-  DATE_RE,
-  TIME_RE,
-  asString,
-  assertBookable,
-  assertNoOverlap,
-  getSetting,
-  notify,
-  notifyRoles,
-  pageMeta,
-  providerRoleForCategory,
-  readBody,
-  readPage,
-  serializableWrite,
-  shapeAppointment,
-} from "@/app/api/_lib/shape";
+import { APPOINTMENT_INCLUDE, DATE_RE, MAX_LEN, TIME_RE, asBoundedString, asString, assertBookable, assertNoOverlap, getSetting, notify, notifyRoles, pageMeta, providerRoleForCategory, readBody, readPage, serializableWrite, shapeAppointment, todayStr } from "@/app/api/_lib/shape";
 
 /**
  * GET /api/appointments — role-scoped list.
@@ -36,6 +20,17 @@ export async function GET(req: Request) {
 
     const status = url.searchParams.get("status");
     if (status) where.status = status;
+
+    // Staff/admin can scope to one customer — the customer-history dialog used to
+    // fetch every appointment in the clinic and filter it in the browser.
+    const customerId = url.searchParams.get("customerId");
+    if (customerId && (user.role === "ADMIN" || user.role === "STAFF")) {
+      where.customerId = customerId;
+    }
+    const providerId = url.searchParams.get("providerId");
+    if (providerId && (user.role === "ADMIN" || user.role === "STAFF")) {
+      where.providerId = providerId;
+    }
 
     const date = url.searchParams.get("date");
     const from = url.searchParams.get("from");
@@ -64,7 +59,15 @@ export async function GET(req: Request) {
     }
 
     const page = readPage(url);
-    const [appointments, total] = await Promise.all([
+
+    // Counts come from the database over the *whole* filtered set. Tab counts used
+    // to be derived from the returned array, so once a list passed the page cap
+    // every count silently became a count of the first page only.
+    const scope: Prisma.AppointmentWhereInput = { ...where };
+    delete (scope as { status?: unknown }).status; // tabs span statuses
+
+    const today = todayStr();
+    const [appointments, total, byStatus, todayCount, upcomingCount] = await Promise.all([
       db.appointment.findMany({
         where,
         include: APPOINTMENT_INCLUDE,
@@ -72,8 +75,24 @@ export async function GET(req: Request) {
         ...page,
       }),
       db.appointment.count({ where }),
+      db.appointment.groupBy({ by: ["status"], where: scope, _count: { _all: true } }),
+      db.appointment.count({ where: { ...scope, date: today } }),
+      db.appointment.count({
+        where: { ...scope, date: { gt: today }, status: { notIn: ["CANCELLED", "COMPLETED"] } },
+      }),
     ]);
-    return json({ appointments: appointments.map(shapeAppointment), page: pageMeta(total, page) });
+
+    const counts: Record<string, number> = { today: todayCount, upcoming: upcomingCount, all: 0 };
+    for (const row of byStatus) {
+      counts[row.status] = row._count._all;
+      counts.all += row._count._all;
+    }
+
+    return json({
+      appointments: appointments.map(shapeAppointment),
+      page: pageMeta(total, page),
+      counts,
+    });
   } catch (e) {
     return handleError(e);
   }
@@ -89,7 +108,7 @@ export async function POST(req: Request) {
     const providerId = asString(body.providerId);
     const date = asString(body.date);
     const time = asString(body.time);
-    const notes = asString(body.notes);
+    const notes = asBoundedString(body.notes, MAX_LEN.NOTES, "Notes");
 
     if (!petId) throw new ApiError("petId is required.", 400);
     if (!serviceId) throw new ApiError("serviceId is required.", 400);

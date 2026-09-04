@@ -24,7 +24,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { apiFetch } from "@/lib/api";
 import { ListNotice } from "@/components/shared/list-notice";
 import { timeAgo } from "@/lib/formatters";
-import type { PageMeta, ReviewDTO } from "@/lib/types";
+import type { ListCounts, PageMeta, ReviewDTO } from "@/lib/types";
 
 /* ------------------------------- constants -------------------------------- */
 
@@ -47,13 +47,19 @@ export function AdminReviewsView() {
   const [deleting, setDeleting] = useState(false);
 
   const [page, setPage] = useState<PageMeta | null>(null);
+  const [serverCounts, setServerCounts] = useState<ListCounts | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiFetch<{ reviews: ReviewDTO[]; page?: PageMeta }>("/api/reviews?status=ALL");
+      const res = await apiFetch<{
+        reviews: ReviewDTO[];
+        page?: PageMeta;
+        counts?: ListCounts;
+      }>("/api/reviews?status=ALL");
       setReviews(res.reviews);
       setPage(res.page ?? null);
+      setServerCounts(res.counts ?? null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to load reviews");
       setReviews(null);
@@ -285,7 +291,7 @@ function ReviewCard({
         <Button
           variant="ghost"
           size="icon"
-          className="size-10 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:bg-rose-950/40 hover:text-rose-700 dark:text-rose-200"
+          className="size-10 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-700 dark:hover:text-rose-200"
           disabled={busy}
           onClick={onDelete}
           aria-label="Delete review"

@@ -21,26 +21,21 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { paymentMethodLabel } from "@/lib/constants";
 import { apiFetch } from "@/lib/api";
 import { ListNotice } from "@/components/shared/list-notice";
-import { formatBDT, formatDate } from "@/lib/formatters";
+import { formatBDT, formatDate, formatInstantDate } from "@/lib/formatters";
 import type { PageMeta, PaymentDTO } from "@/lib/types";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
 import { StatusBadge } from "@/components/shared/status-badge";
 
-const METHOD_LABELS: Record<string, string> = {
-  CASH: "Cash",
-  CARD: "Card",
-  MOBILE: "Mobile Banking",
-};
-
 type StatusFilter = "ALL" | "PAID" | "REFUNDED";
 
-/** paidAt is an ISO datetime — display its date part via the shared formatter. */
+/** paidAt is an ISO instant — show the clinic-local day, not the UTC one. */
 function paidDate(iso: string): string {
-  return formatDate((iso ?? "").slice(0, 10));
+  return formatDate(formatInstantDate(iso ?? ""));
 }
 
 export function CustomerPaymentsView() {
@@ -170,7 +165,7 @@ export function CustomerPaymentsView() {
                     <TableCell className="whitespace-nowrap font-semibold text-primary">
                       {formatBDT(p.amount)}
                     </TableCell>
-                    <TableCell>{METHOD_LABELS[p.method] ?? p.method}</TableCell>
+                    <TableCell>{paymentMethodLabel(p.method)}</TableCell>
                     <TableCell className="max-w-40 truncate font-mono text-xs text-muted-foreground">
                       {p.transactionId}
                     </TableCell>
@@ -201,7 +196,7 @@ export function CustomerPaymentsView() {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold">{p.appointment.service.name}</p>
                         <p className="truncate text-xs text-muted-foreground">
-                          {p.appointment.pet.name} · {METHOD_LABELS[p.method] ?? p.method}
+                          {p.appointment.pet.name} · {paymentMethodLabel(p.method)}
                         </p>
                       </div>
                     </div>

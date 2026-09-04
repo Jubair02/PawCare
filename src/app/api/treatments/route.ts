@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { ApiError, handleError, json, requireRole, requireUser } from "@/lib/auth";
 import type { Prisma } from "@prisma/client";
-import { DATE_RE, TREATMENT_INCLUDE, asString, notify, pageMeta, readBody, readPage, shapeTreatment } from "@/app/api/_lib/shape";
+import { DATE_RE, MAX_LEN, TREATMENT_INCLUDE, asBoundedString, asString, notify, pageMeta, readBody, readPage, shapeTreatment } from "@/app/api/_lib/shape";
 
 /**
  * GET /api/treatments — role-scoped. ?petId=&customerId=&providerId=
@@ -67,29 +67,51 @@ export async function POST(req: Request) {
       );
     }
 
-    const data = {
-      symptoms: asString(body.symptoms) ?? null,
-      diagnosis: asString(body.diagnosis) ?? null,
-      treatmentPlan: asString(body.treatmentPlan) ?? null,
-      prescription: asString(body.prescription) ?? null,
-      medication: asString(body.medication) ?? null,
-      dosage: asString(body.dosage) ?? null,
-      followUpDate: asString(body.followUpDate) ?? null,
-      notes: asString(body.notes) ?? null,
-    };
+    const FIELDS = [
+      "symptoms",
+      "diagnosis",
+      "treatmentPlan",
+      "prescription",
+      "medication",
+      "dosage",
+      "followUpDate",
+      "notes",
+    ] as const;
 
-    // A record with nothing clinical in it is not a record. Previously an empty
-    // POST was accepted and silently closed the visit.
-    if (!data.diagnosis && !data.treatmentPlan) {
-      throw new ApiError("A diagnosis or a treatment plan is required.", 400);
-    }
-    if (data.followUpDate && !DATE_RE.test(data.followUpDate)) {
-      throw new ApiError("Follow-up date must be in yyyy-MM-dd format.", 400);
+    // Only touch fields the caller actually sent. This used to overwrite the whole
+    // row every time, so editing one field silently erased every other one.
+    // Sending an explicit empty string still clears a field.
+    const incoming: Partial<Record<(typeof FIELDS)[number], string | null>> = {};
+    for (const key of FIELDS) {
+      if (key in body) incoming[key] = asBoundedString(body[key], MAX_LEN.LONG, key) || null;
     }
 
     const existing = await db.treatment.findUnique({ where: { appointmentId } });
+
+    // Validate the result of the edit, not just the patch — amending the notes on
+    // a record that already has a diagnosis must not be rejected.
+    const merged = {
+      symptoms: existing?.symptoms ?? null,
+      diagnosis: existing?.diagnosis ?? null,
+      treatmentPlan: existing?.treatmentPlan ?? null,
+      prescription: existing?.prescription ?? null,
+      medication: existing?.medication ?? null,
+      dosage: existing?.dosage ?? null,
+      followUpDate: existing?.followUpDate ?? null,
+      notes: existing?.notes ?? null,
+      ...incoming,
+    };
+
+    if (!merged.diagnosis && !merged.treatmentPlan) {
+      throw new ApiError("A diagnosis or a treatment plan is required.", 400);
+    }
+    if (merged.followUpDate && !DATE_RE.test(merged.followUpDate)) {
+      throw new ApiError("Follow-up date must be in yyyy-MM-dd format.", 400);
+    }
+
+    const data = merged;
     if (existing) {
-      await db.treatment.update({ where: { id: existing.id }, data });
+      await db.treatment.update({ where: { id: existing.id }, data: incoming });
     } else {
       await db.treatment.create({
         data: {

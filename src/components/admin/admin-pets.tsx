@@ -25,9 +25,10 @@ import {
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, isAbortError } from "@/lib/api";
 import { ListNotice } from "@/components/shared/list-notice";
-import { formatDate, formatInstantDate, initials, petEmoji } from "@/lib/formatters";
+import { genderLabel, petTypeLabel } from "@/lib/constants";
+import { formatDate, formatInstantDate, initials, petAge, petEmoji } from "@/lib/formatters";
 import type { PageMeta, PetDTO } from "@/lib/types";
 
 /* ------------------------------- constants -------------------------------- */
@@ -41,25 +42,17 @@ const TYPE_BADGE: Record<string, string> = {
 
 const TYPE_TABS = ["ALL", "DOG", "CAT", "BIRD", "OTHER"];
 
-/** ISO datetime → "20 Nov 2025" (formatDate expects yyyy-MM-dd). */
-const fmtJoined = formatInstantDate;
+/**
+ * ISO instant → "20 Nov 2025" in clinic time.
+ *
+ * The table and the mobile card printed the bare `formatInstantDate` output
+ * ("2025-11-20") while the detail dialog ran it through `formatDate`; composing
+ * the pair here keeps every "registered" date in one house style.
+ */
+const fmtJoined = (iso: string) => formatDate(formatInstantDate(iso));
 
-/** "yyyy-MM-dd" → "2y 6mo" style age label. */
-function calcAge(birthDate?: string): string {
-  if (!birthDate) return "—";
-  const [y, m, d] = birthDate.split("-").map(Number);
-  if (!y || !m || !d) return "—";
-  const birth = new Date(y, m - 1, d);
-  const now = new Date();
-  let months = (now.getFullYear() - birth.getFullYear()) * 12 + (now.getMonth() - birth.getMonth());
-  if (now.getDate() < birth.getDate()) months -= 1;
-  if (months < 0) return "—";
-  if (months === 0) return "Newborn";
-  const years = Math.floor(months / 12);
-  const rem = months % 12;
-  if (years === 0) return `${months}mo`;
-  return rem ? `${years}y ${rem}mo` : `${years}y`;
-}
+/** Shared age label, with this view's own placeholder (`petAge` returns null). */
+const ageLabel = (birthDate?: string) => petAge(birthDate) ?? "—";
 
 /* --------------------------------- view ----------------------------------- */
 
@@ -79,25 +72,36 @@ export function AdminPetsView() {
 
   const [page, setPage] = useState<PageMeta | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (q) params.set("q", q);
-      const qs = params.toString();
-      const res = await apiFetch<{ pets: PetDTO[]; page?: PageMeta }>(`/api/pets${qs ? `?${qs}` : ""}`);
-      setPets(res.pets);
-      setPage(res.page ?? null);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to load pets");
-      setPets(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [q]);
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (q) params.set("q", q);
+        const qs = params.toString();
+        const res = await apiFetch<{ pets: PetDTO[]; page?: PageMeta }>(
+          `/api/pets${qs ? `?${qs}` : ""}`,
+          { signal }
+        );
+        setPets(res.pets);
+        setPage(res.page ?? null);
+      } catch (e) {
+        if (isAbortError(e)) return;
+        toast.error(e instanceof Error ? e.message : "Failed to load pets");
+        setPets(null);
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [q]
+  );
 
+  // Aborting on cleanup keeps a slow result for an earlier search term from
+  // landing after the newer one and replacing the list the user is reading.
   useEffect(() => {
-    void load();
+    const ac = new AbortController();
+    void load(ac.signal);
+    return () => ac.abort();
   }, [load]);
 
   const visible = (pets ?? []).filter((p) => typeFilter === "ALL" || p.type === typeFilter);
@@ -178,8 +182,17 @@ export function AdminPetsView() {
                 {visible.map((p) => (
                   <TableRow
                     key={p.id}
-                    className="cursor-pointer"
+                    className="cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setDetail(p)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setDetail(p);
+                      }
+                    }}
+                    aria-label={`View details for ${p.name}`}
                   >
                     <TableCell>
                       <div className="flex items-center gap-3">
@@ -194,15 +207,15 @@ export function AdminPetsView() {
                     </TableCell>
                     <TableCell>
                       <Badge variant="outline" className={TYPE_BADGE[p.type] ?? ""}>
-                        {p.type}
+                        {petTypeLabel(p.type)}
                       </Badge>
                     </TableCell>
                     <TableCell>
                       <p className="truncate font-medium">{p.owner?.name ?? "—"}</p>
                       <p className="truncate text-xs text-muted-foreground">{p.owner?.email ?? ""}</p>
                     </TableCell>
-                    <TableCell className="text-sm">{p.gender ? p.gender.charAt(0) + p.gender.slice(1).toLowerCase() : "—"}</TableCell>
-                    <TableCell className="text-sm">{calcAge(p.birthDate)}</TableCell>
+                    <TableCell className="text-sm">{genderLabel(p.gender)}</TableCell>
+                    <TableCell className="text-sm">{ageLabel(p.birthDate)}</TableCell>
                     <TableCell className="text-sm">{p.weight != null ? `${p.weight} kg` : "—"}</TableCell>
                     <TableCell>{p.vaccinationStatus ? <StatusBadge status={p.vaccinationStatus} /> : "—"}</TableCell>
                     <TableCell className="text-center text-sm">{p._count?.appointments ?? 0}</TableCell>
@@ -257,15 +270,15 @@ export function AdminPetsView() {
                         <p className="truncate text-xs text-muted-foreground">{p.breed || "Mixed"}</p>
                       </div>
                       <Badge variant="outline" className={TYPE_BADGE[p.type] ?? ""}>
-                        {p.type}
+                        {petTypeLabel(p.type)}
                       </Badge>
                     </div>
                     <p className="mt-2 truncate text-xs text-muted-foreground">
                       Owner: {p.owner?.name ?? "—"} · {p.owner?.email ?? ""}
                     </p>
                     <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                      <span>{p.gender ? p.gender.charAt(0) + p.gender.slice(1).toLowerCase() : "—"}</span>
-                      <span>{calcAge(p.birthDate)}</span>
+                      <span>{genderLabel(p.gender)}</span>
+                      <span>{ageLabel(p.birthDate)}</span>
                       <span>{p.weight != null ? `${p.weight} kg` : ""}</span>
                       <span>{p._count?.appointments ?? 0} visits</span>
                     </div>
@@ -316,7 +329,7 @@ export function AdminPetsView() {
                   <div>
                     <p className="text-xs text-muted-foreground">Age</p>
                     <p className="mt-1 font-medium">
-                      {calcAge(detail.birthDate)}
+                      {ageLabel(detail.birthDate)}
                       {detail.birthDate ? <span className="ml-1 text-xs font-normal text-muted-foreground">({formatDate(detail.birthDate)})</span> : null}
                     </p>
                   </div>

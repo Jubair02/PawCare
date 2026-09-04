@@ -9,7 +9,10 @@ export type AppointmentStatus =
   | "IN_PROGRESS"
   | "COMPLETED"
   | "CANCELLED";
-export type PaymentStatus = "UNPAID" | "PAID" | "REFUNDED";
+/** An appointment's payment state. CASH_DUE = cash promised, not yet collected. */
+export type PaymentStatus = "UNPAID" | "CASH_DUE" | "PAID" | "REFUNDED";
+/** A payment record's own state. PENDING = awaiting collection at the desk. */
+export type PaymentRecordStatus = "PENDING" | "PAID" | "REFUNDED";
 export type PaymentMethod = "CASH" | "CARD" | "MOBILE";
 export type ProviderSpecialty = "VET" | "GROOMER";
 export type ServiceCategory = "MEDICAL" | "GROOMING" | "DIAGNOSTIC";
@@ -231,6 +234,19 @@ export interface AdminOverviewData {
 }
 
 // ---- Misc API payloads ----
+/** Per-status totals computed server-side over the whole filtered set. */
+export type ListCounts = Record<string, number>;
+
+/** Money totals for a payments query, aggregated in the database. */
+export interface PaymentSummary {
+  paid: number;
+  pending: number;
+  refunded: number;
+  paidCount: number;
+  pendingCount: number;
+  refundedCount: number;
+}
+
 /** Paging metadata returned by every list endpoint (see readPage/pageMeta). */
 export interface PageMeta {
   total: number;

@@ -46,9 +46,9 @@ import {
 } from "@/components/ui/table";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, isAbortError } from "@/lib/api";
 import { ListNotice } from "@/components/shared/list-notice";
-import { formatInstantDate, initials } from "@/lib/formatters";
+import { formatDate, formatInstantDate, initials } from "@/lib/formatters";
 import { useAppStore } from "@/lib/store";
 import type { PageMeta, Role, UserDTO } from "@/lib/types";
 
@@ -113,26 +113,37 @@ export function AdminUsersView() {
 
   const [page, setPage] = useState<PageMeta | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (roleFilter !== "ALL") params.set("role", roleFilter);
-      if (q) params.set("q", q);
-      const qs = params.toString();
-      const res = await apiFetch<{ users: UserDTO[]; page?: PageMeta }>(`/api/users${qs ? `?${qs}` : ""}`);
-      setUsers(res.users);
-      setPage(res.page ?? null);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to load users");
-      setUsers(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [roleFilter, q]);
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (roleFilter !== "ALL") params.set("role", roleFilter);
+        if (q) params.set("q", q);
+        const qs = params.toString();
+        const res = await apiFetch<{ users: UserDTO[]; page?: PageMeta }>(
+          `/api/users${qs ? `?${qs}` : ""}`,
+          { signal }
+        );
+        setUsers(res.users);
+        setPage(res.page ?? null);
+      } catch (e) {
+        if (isAbortError(e)) return;
+        toast.error(e instanceof Error ? e.message : "Failed to load users");
+        setUsers(null);
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [roleFilter, q]
+  );
 
+  // Aborting on cleanup keeps a slow result for an earlier search term or role
+  // filter from landing after the newer one and replacing the visible list.
   useEffect(() => {
-    void load();
+    const ac = new AbortController();
+    void load(ac.signal);
+    return () => ac.abort();
   }, [load]);
 
   /* ------------------------------ mutations ------------------------------- */
@@ -192,12 +203,15 @@ export function AdminUsersView() {
     try {
       await apiFetch(`/api/users/${editing.id}`, {
         method: "PATCH",
+        // Emptied fields must go as "" — `undefined` omits the key and the API
+        // skips it, so clearing a phone/bio/specialty silently did nothing.
         body: {
           name: editForm.name.trim(),
-          phone: editForm.phone.trim() || undefined,
+          phone: editForm.phone.trim(),
           role: editForm.role,
-          specialty: editForm.role === "VET" || editForm.role === "GROOMER" ? editForm.specialty || undefined : undefined,
-          bio: editForm.bio.trim() || undefined,
+          specialty:
+            editForm.role === "VET" || editForm.role === "GROOMER" ? editForm.specialty || "" : "",
+          bio: editForm.bio.trim(),
           ...(editForm.password ? { password: editForm.password } : {}),
         },
       });
@@ -233,8 +247,12 @@ export function AdminUsersView() {
       setDeleteTarget(null);
       void load();
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Could not delete user";
-      toast.error(msg.includes("409") || msg.toLowerCase().includes("deactivate") ? "User has records — deactivate instead" : msg);
+      // Show the server's message, which already names the reason ("This user
+      // has pets or appointments and cannot be deleted. Deactivate the account
+      // instead."). The old code looked for "409" in the text to detect that
+      // case, but apiFetch throws `Error(data.error)` and never includes the
+      // status code, so that branch was dead.
+      toast.error(e instanceof Error ? e.message : "Could not delete user.");
     } finally {
       setDeleting(false);
     }
@@ -318,6 +336,7 @@ export function AdminUsersView() {
               <TableBody>
                 {users.map((u) => {
                   const isSelf = u.id === me?.id;
+                  const isCustomer = u.role === "CUSTOMER";
                   return (
                     <TableRow key={u.id}>
                       <TableCell>
@@ -343,8 +362,32 @@ export function AdminUsersView() {
                         </div>
                       </TableCell>
                       <TableCell className="text-sm">{u.phone || "—"}</TableCell>
-                      <TableCell className="text-center text-sm">{u._count?.pets ?? 0}</TableCell>
-                      <TableCell className="text-center text-sm">{u._count?.customerAppointments ?? 0}</TableCell>
+                      {/*
+                        Both counts come from customer-only relations, so a vet,
+                        groomer, staff or admin row always read a hard "0" —
+                        indistinguishable from a customer who genuinely has none.
+                      */}
+                      <TableCell className="text-center text-sm">
+                        {isCustomer ? (
+                          u._count?.pets ?? 0
+                        ) : (
+                          <span className="text-muted-foreground" title="Only customers register pets">
+                            —
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center text-sm">
+                        {isCustomer ? (
+                          u._count?.customerAppointments ?? 0
+                        ) : (
+                          <span
+                            className="text-muted-foreground"
+                            title="Only customers book appointments — a provider's workload is on their own dashboard"
+                          >
+                            —
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell>
                         {isSelf ? (
                           <Badge variant="outline" className="bg-stone-100 dark:bg-stone-950/50 text-stone-700 dark:text-stone-200 border-stone-200 dark:border-stone-900">
@@ -361,7 +404,7 @@ export function AdminUsersView() {
                           </span>
                         )}
                       </TableCell>
-                      <TableCell className="whitespace-nowrap text-sm">{fmtJoined(u.createdAt)}</TableCell>
+                      <TableCell className="whitespace-nowrap text-sm">{formatDate(fmtJoined(u.createdAt))}</TableCell>
                       <TableCell>
                         <div className="flex items-center justify-end gap-1">
                           <Button variant="ghost" size="icon" className="size-10" onClick={() => openEdit(u)} aria-label={`Edit ${u.name}`}>
@@ -370,7 +413,7 @@ export function AdminUsersView() {
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="size-10 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:bg-rose-950/40 hover:text-rose-700 dark:text-rose-200"
+                            className="size-10 text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-700 dark:hover:text-rose-200"
                             disabled={isSelf || u.role === "ADMIN"}
                             onClick={() => setDeleteTarget(u)}
                             aria-label={`Delete ${u.name}`}
@@ -390,6 +433,7 @@ export function AdminUsersView() {
           <ul className="space-y-3 md:hidden">
             {users.map((u) => {
               const isSelf = u.id === me?.id;
+              const isCustomer = u.role === "CUSTOMER";
               return (
                 <li key={u.id} className="rounded-xl border p-4">
                   <div className="flex items-start gap-3">
@@ -408,9 +452,13 @@ export function AdminUsersView() {
                       </div>
                       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                         <span>{u.phone || "No phone"}</span>
-                        <span>{u._count?.pets ?? 0} pets</span>
-                        <span>{u._count?.customerAppointments ?? 0} bookings</span>
-                        <span>Joined {fmtJoined(u.createdAt)}</span>
+                        {isCustomer ? (
+                          <>
+                            <span>{u._count?.pets ?? 0} pets</span>
+                            <span>{u._count?.customerAppointments ?? 0} bookings</span>
+                          </>
+                        ) : null}
+                        <span>Joined {formatDate(fmtJoined(u.createdAt))}</span>
                       </div>
                       <div className="mt-3 flex items-center justify-between">
                         {isSelf ? (

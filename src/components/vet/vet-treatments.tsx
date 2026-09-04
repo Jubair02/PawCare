@@ -10,15 +10,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, errMsg } from "@/lib/api";
 import { ListNotice } from "@/components/shared/list-notice";
-import { formatDate, petEmoji } from "@/lib/formatters";
+import { formatDate, formatTime, petEmoji } from "@/lib/formatters";
+import { PROVIDER_RECORDS_LABEL } from "@/lib/constants";
 import { useAppStore } from "@/lib/store";
 import type { PageMeta, TreatmentDTO } from "@/lib/types";
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : "Something went wrong";
-}
 
 export function VetTreatmentsView() {
   const user = useAppStore((s) => s.user);
@@ -48,7 +45,7 @@ export function VetTreatmentsView() {
   return (
     <div className="space-y-4">
       <SectionHeader
-        title={isVet ? "Treatments" : "Session records"}
+        title={isVet ? PROVIDER_RECORDS_LABEL.VET : PROVIDER_RECORDS_LABEL.GROOMER}
         description={
           isVet
             ? "Medical records you have written, newest first."
@@ -90,7 +87,7 @@ export function VetTreatmentsView() {
                       <span className="font-mono text-sm font-bold text-primary">
                         {formatDate(t.appointment.date)}
                       </span>
-                      <span className="text-[11px] text-primary/70">{t.appointment.time}</span>
+                      <span className="text-[11px] text-primary/70">{formatTime(t.appointment.time)}</span>
                     </div>
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold">

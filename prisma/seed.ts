@@ -60,29 +60,37 @@ async function main() {
   await db.setting.deleteMany();
 
   console.log("👤 Creating users...");
+  // bcrypt is deliberately slow, so hash each distinct demo password once.
+  const pw = Object.fromEntries(
+    await Promise.all(
+      ["admin123", "staff123", "vet123", "groomer123", "customer123"].map(
+        async (p) => [p, await hashPassword(p)] as const,
+      ),
+    ),
+  ) as Record<string, string>;
   const admin = await db.user.create({
-    data: { name: "Ayesha Rahman", email: "admin@pawcare.com", password: hashPassword("admin123"), role: "ADMIN", phone: "+880 1711-000001", bio: "Platform administrator" },
+    data: { name: "Ayesha Rahman", email: "admin@pawcare.com", password: pw["admin123"], role: "ADMIN", phone: "+880 1711-000001", bio: "Platform administrator" },
   });
   const staff = await db.user.create({
-    data: { name: "Farhan Ahmed", email: "staff@pawcare.com", password: hashPassword("staff123"), role: "STAFF", phone: "+880 1711-000002", bio: "Front desk operations" },
+    data: { name: "Farhan Ahmed", email: "staff@pawcare.com", password: pw["staff123"], role: "STAFF", phone: "+880 1711-000002", bio: "Front desk operations" },
   });
   const vet1 = await db.user.create({
-    data: { name: "Dr. Nusrat Jahan", email: "vet@pawcare.com", password: hashPassword("vet123"), role: "VET", specialty: "VET", phone: "+880 1711-000003", bio: "Small animal specialist with 8 years of experience in internal medicine and surgery." },
+    data: { name: "Dr. Nusrat Jahan", email: "vet@pawcare.com", password: pw["vet123"], role: "VET", specialty: "VET", phone: "+880 1711-000003", bio: "Small animal specialist with 8 years of experience in internal medicine and surgery." },
   });
   const vet2 = await db.user.create({
-    data: { name: "Dr. Tanvir Hasan", email: "tanvir.vet@pawcare.com", password: hashPassword("vet123"), role: "VET", specialty: "VET", phone: "+880 1711-000004", bio: "Feline medicine & dentistry focused veterinarian." },
+    data: { name: "Dr. Tanvir Hasan", email: "tanvir.vet@pawcare.com", password: pw["vet123"], role: "VET", specialty: "VET", phone: "+880 1711-000004", bio: "Feline medicine & dentistry focused veterinarian." },
   });
   const groomer = await db.user.create({
-    data: { name: "Sadia Karim", email: "groomer@pawcare.com", password: hashPassword("groomer123"), role: "GROOMER", specialty: "GROOMER", phone: "+880 1711-000005", bio: "Certified pet groomer — gentle handling for anxious pets." },
+    data: { name: "Sadia Karim", email: "groomer@pawcare.com", password: pw["groomer123"], role: "GROOMER", specialty: "GROOMER", phone: "+880 1711-000005", bio: "Certified pet groomer — gentle handling for anxious pets." },
   });
   const c1 = await db.user.create({
-    data: { name: "Rahim Uddin", email: "customer@pawcare.com", password: hashPassword("customer123"), role: "CUSTOMER", phone: "+880 1811-000010" },
+    data: { name: "Rahim Uddin", email: "customer@pawcare.com", password: pw["customer123"], role: "CUSTOMER", phone: "+880 1811-000010" },
   });
   const c2 = await db.user.create({
-    data: { name: "Nila Akter", email: "nila@example.com", password: hashPassword("customer123"), role: "CUSTOMER", phone: "+880 1811-000011" },
+    data: { name: "Nila Akter", email: "nila@example.com", password: pw["customer123"], role: "CUSTOMER", phone: "+880 1811-000011" },
   });
   const c3 = await db.user.create({
-    data: { name: "Kamal Hossain", email: "kamal@example.com", password: hashPassword("customer123"), role: "CUSTOMER", phone: "+880 1811-000012" },
+    data: { name: "Kamal Hossain", email: "kamal@example.com", password: pw["customer123"], role: "CUSTOMER", phone: "+880 1811-000012" },
   });
 
   console.log("⚙️  Creating settings...");

@@ -85,8 +85,19 @@ export async function readBody(req: Request): Promise<Record<string, unknown>> {
   if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
     throw new ApiError("Request body is too large.", 413);
   }
+  // Content-Length is a client-supplied hint: it can be absent (chunked) or a
+  // lie. Measure what actually arrived before parsing it.
+  let raw: string;
   try {
-    const parsed: unknown = await req.json();
+    raw = await req.text();
+  } catch {
+    return {};
+  }
+  if (Buffer.byteLength(raw, "utf8") > MAX_BODY_BYTES) {
+    throw new ApiError("Request body is too large.", 413);
+  }
+  try {
+    const parsed: unknown = JSON.parse(raw);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
     return {};
   } catch {
@@ -94,8 +105,37 @@ export async function readBody(req: Request): Promise<Record<string, unknown>> {
   }
 }
 
+/**
+ * Per-field length caps. Postgres `text` is unbounded, so without these the API
+ * happily stored a 20,000-character name.
+ */
+export const MAX_LEN = {
+  NAME: 120,
+  EMAIL: 254,
+  PASSWORD: 200,
+  PHONE: 40,
+  SHORT: 120,
+  BIO: 2000,
+  NOTES: 2000,
+  COMMENT: 2000,
+  LONG: 5000,
+} as const;
+
+export function assertMaxLen(value: string | undefined, max: number, label: string) {
+  if (value !== undefined && value.length > max) {
+    throw new ApiError(`${label} must be ${max} characters or fewer.`, 400);
+  }
+}
+
 export function asString(v: unknown): string | undefined {
   return typeof v === "string" ? v.trim() : undefined;
+}
+
+/** `asString` with a length cap. Use for anything free-text a user can type. */
+export function asBoundedString(v: unknown, max: number, label: string): string | undefined {
+  const value = asString(v);
+  assertMaxLen(value, max, label);
+  return value;
 }
 
 export function asNumber(v: unknown): number | undefined {

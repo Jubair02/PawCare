@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Banknote, CalendarClock, HandCoins, Loader2, Receipt, RefreshCw, RotateCcw, TrendingUp } from "lucide-react";
+import { Ban, Banknote, CalendarClock, HandCoins, Loader2, Receipt, RefreshCw, RotateCcw, TrendingUp } from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -38,17 +38,11 @@ import { StatCard } from "@/components/shared/stat-card";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { apiFetch } from "@/lib/api";
 import { ListNotice } from "@/components/shared/list-notice";
-import { PAYMENT_METHODS } from "@/lib/constants";
+import { PAYMENT_METHODS, paymentMethodLabel } from "@/lib/constants";
 import { formatBDT, formatDate, formatInstantDate } from "@/lib/formatters";
 import type { PageMeta, PaymentDTO } from "@/lib/types";
 
 /* ------------------------------- constants -------------------------------- */
-
-const METHOD_LABELS: Record<string, string> = {
-  CASH: "Cash",
-  CARD: "Card",
-  MOBILE: "Mobile Banking",
-};
 
 /** ISO datetime → "20 Nov 2025" (formatDate expects yyyy-MM-dd). */
 const fmtPaidAt = formatInstantDate;
@@ -135,6 +129,23 @@ export function AdminPaymentsView() {
     }
   }
 
+  const [voidingId, setVoidingId] = useState<string | null>(null);
+
+  // Uncollected cash on a cancelled booking has no other exit: it cannot be
+  // collected and the refund route rightly refuses it.
+  async function voidCash(p: PaymentDTO) {
+    setVoidingId(p.id);
+    try {
+      await apiFetch(`/api/payments/${p.id}/void`, { method: "PATCH" });
+      toast.success(`Invoice ${p.invoiceId} voided`);
+      void load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not void the payment");
+    } finally {
+      setVoidingId(null);
+    }
+  }
+
   async function handleRefund() {
     if (!refundTarget) return;
     setRefunding(true);
@@ -179,9 +190,9 @@ export function AdminPaymentsView() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">All statuses</SelectItem>
-              <SelectItem value="UNPAID">UNPAID</SelectItem>
-              <SelectItem value="PAID">PAID</SelectItem>
-              <SelectItem value="REFUNDED">REFUNDED</SelectItem>
+              <SelectItem value="PENDING">Cash due</SelectItem>
+              <SelectItem value="PAID">Paid</SelectItem>
+              <SelectItem value="REFUNDED">Refunded</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -262,7 +273,7 @@ export function AdminPaymentsView() {
                     </TableCell>
                     <TableCell className="text-sm">{p.appointment.pet.name}</TableCell>
                     <TableCell className="whitespace-nowrap text-sm font-semibold">{formatBDT(p.amount)}</TableCell>
-                    <TableCell className="text-sm">{METHOD_LABELS[p.method] ?? p.method}</TableCell>
+                    <TableCell className="text-sm">{paymentMethodLabel(p.method)}</TableCell>
                     <TableCell className="max-w-40 truncate font-mono text-xs text-muted-foreground">
                       {p.transactionId}
                     </TableCell>
@@ -284,6 +295,22 @@ export function AdminPaymentsView() {
                               <HandCoins className="size-4" />
                             )}
                             Mark received
+                          </Button>
+                        ) : null}
+                        {p.status === "PENDING" ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="min-h-10 whitespace-nowrap text-muted-foreground hover:text-foreground"
+                            disabled={voidingId === p.id}
+                            onClick={() => void voidCash(p)}
+                          >
+                            {voidingId === p.id ? (
+                              <Loader2 className="size-4 animate-spin" />
+                            ) : (
+                              <Ban className="size-4" />
+                            )}
+                            Void
                           </Button>
                         ) : p.status === "PAID" ? (
                           <Button
@@ -324,14 +351,14 @@ export function AdminPaymentsView() {
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   <span className="font-semibold text-foreground">{formatBDT(p.amount)}</span>
-                  <span>{METHOD_LABELS[p.method] ?? p.method}</span>
+                  <span>{paymentMethodLabel(p.method)}</span>
                   <span className="inline-flex items-center gap-1">
                     <CalendarClock className="size-3" /> {formatDate(fmtPaidAt(p.paidAt))}
                   </span>
                 </div>
                 <p className="mt-1 truncate font-mono text-xs text-muted-foreground">{p.transactionId}</p>
                 {p.status === "PENDING" ? (
-                  <div className="mt-3 flex justify-end">
+                  <div className="mt-3 flex justify-end gap-2">
                     <Button
                       size="sm"
                       className="min-h-10"
@@ -344,6 +371,20 @@ export function AdminPaymentsView() {
                         <HandCoins className="size-4" />
                       )}
                       Mark received
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="min-h-10 text-muted-foreground"
+                      disabled={voidingId === p.id}
+                      onClick={() => void voidCash(p)}
+                    >
+                      {voidingId === p.id ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Ban className="size-4" />
+                      )}
+                      Void
                     </Button>
                   </div>
                 ) : null}

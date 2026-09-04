@@ -24,11 +24,35 @@ export async function GET(req: Request) {
     if (method) where.method = method;
 
     const page = readPage(url);
-    const [payments, total] = await Promise.all([
+
+    // Money totals are aggregated in the database across the whole filtered set.
+    // The KPI cards used to sum the returned array, so past the page cap the
+    // clinic's revenue simply stopped counting.
+    const scope: Prisma.PaymentWhereInput = { ...where };
+    delete (scope as { status?: unknown }).status;
+
+    const [payments, total, byStatus] = await Promise.all([
       db.payment.findMany({ where, include: PAYMENT_INCLUDE, orderBy: { paidAt: "desc" }, ...page }),
       db.payment.count({ where }),
+      db.payment.groupBy({ by: ["status"], where: scope, _sum: { amount: true }, _count: { _all: true } }),
     ]);
-    return json({ payments: payments.map(shapePayment), page: pageMeta(total, page) });
+
+    const summary = { paid: 0, pending: 0, refunded: 0, paidCount: 0, pendingCount: 0, refundedCount: 0 };
+    for (const row of byStatus) {
+      const amount = row._sum.amount ?? 0;
+      if (row.status === "PAID") {
+        summary.paid = amount;
+        summary.paidCount = row._count._all;
+      } else if (row.status === "PENDING") {
+        summary.pending = amount;
+        summary.pendingCount = row._count._all;
+      } else if (row.status === "REFUNDED") {
+        summary.refunded = amount;
+        summary.refundedCount = row._count._all;
+      }
+    }
+
+    return json({ payments: payments.map(shapePayment), page: pageMeta(total, page), summary });
   } catch (e) {
     return handleError(e);
   }
@@ -65,10 +89,13 @@ export async function POST(req: Request) {
       throw new ApiError("Cancelled appointments cannot be paid.", 409);
     }
 
-    // Cash is settled in person. Recording it as PAID here would put money in the
-    // revenue figures that nobody has actually handed over, so it is booked as a
-    // PENDING record and only staff can mark it collected.
-    const payNow = isPayNowMethod(method);
+    // Card and mobile settle instantly. Cash depends on who is recording it:
+    // a customer choosing "cash" online is only promising to pay, so that books a
+    // PENDING record; a staff member at the front desk is recording money that has
+    // physically changed hands, so it settles immediately. Treating those the same
+    // forced the desk into a two-step dance for every walk-in payment.
+    const atFrontDesk = user.role === "STAFF" || user.role === "ADMIN";
+    const payNow = isPayNowMethod(method) || atFrontDesk;
     const transactionId = `TXN${Date.now()}${Math.floor(1000 + Math.random() * 9000)}`;
 
     // The payment row and the appointment's paymentStatus move together or not at all.

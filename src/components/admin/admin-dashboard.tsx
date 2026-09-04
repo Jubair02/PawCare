@@ -33,73 +33,11 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { ChartCard, ChartTip, STATUS_COLORS, compactMoney } from "@/components/admin/chart-kit";
 import { apiFetch } from "@/lib/api";
 import { formatDateShort, formatBDT, formatTime, petEmoji } from "@/lib/formatters";
 import { useAppStore } from "@/lib/store";
 import type { AdminOverviewData, AppointmentDTO } from "@/lib/types";
-
-/* ------------------------------- chart bits ------------------------------- */
-
-/** Exact status colors per CONTRACT (no blue/indigo anywhere). */
-const STATUS_COLORS: Record<string, string> = {
-  PENDING: "var(--status-pending)",
-  CONFIRMED: "var(--status-confirmed)",
-  CHECKED_IN: "var(--status-checked-in)",
-  IN_PROGRESS: "var(--status-in-progress)",
-  COMPLETED: "var(--status-completed)",
-  CANCELLED: "var(--status-cancelled)",
-};
-
-interface TipEntry {
-  name?: string | number;
-  value?: number | string;
-  color?: string;
-}
-
-/** White card tooltip: border + shadow + rounded (design system). */
-function ChartTip({
-  active,
-  payload,
-  label,
-  money,
-}: {
-  active?: boolean;
-  payload?: TipEntry[];
-  label?: string | number;
-  money?: boolean;
-}) {
-  if (!active || !payload || payload.length === 0) return null;
-  return (
-    <div className="min-w-32 rounded-xl border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-lg">
-      {label !== undefined && label !== "" ? (
-        <p className="mb-1 font-semibold text-foreground">{label}</p>
-      ) : null}
-      {payload.map((entry, i) => (
-        <div key={i} className="flex items-center gap-2 py-0.5">
-          <span className="size-2 shrink-0 rounded-full" style={{ background: entry.color ?? "var(--chart-1)" }} />
-          <span className="text-muted-foreground">{entry.name}</span>
-          <span className="ml-auto pl-3 font-semibold text-stone-800 dark:text-stone-200">
-            {money ? formatBDT(Number(entry.value) || 0) : String(entry.value)}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const compactMoney = (v: number) => (Math.abs(v) >= 1000 ? `৳${Number((v / 1000).toFixed(1))}k` : `৳${v}`);
-
-function ChartCard({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
-  return (
-    <Card className="rounded-2xl p-4 sm:p-6">
-      <div className="mb-4">
-        <p className="font-semibold">{title}</p>
-        <p className="text-xs text-muted-foreground">{description}</p>
-      </div>
-      {children}
-    </Card>
-  );
-}
 
 /* --------------------------------- view ----------------------------------- */
 

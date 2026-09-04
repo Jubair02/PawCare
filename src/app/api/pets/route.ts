@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { ApiError, handleError, json, requireUser } from "@/lib/auth";
 import type { Prisma } from "@prisma/client";
-import { PET_GENDERS, PET_TYPES, VACCINATION_STATUSES, asNumber, asString, assertValidPhoto, pageMeta, readBody, readPage, shapePet } from "@/app/api/_lib/shape";
+import { MAX_LEN, PET_GENDERS, PET_TYPES, VACCINATION_STATUSES, asBoundedString, asNumber, asString, assertValidPhoto, pageMeta, readBody, readPage, shapePet } from "@/app/api/_lib/shape";
 
 /**
  * GET /api/pets — role-scoped.
@@ -47,23 +47,43 @@ export async function GET(req: Request) {
   }
 }
 
-/** POST /api/pets — CUSTOMER creates their own pet. */
+/**
+ * POST /api/pets — CUSTOMER creates their own pet; STAFF/ADMIN register one for
+ * a customer via `ownerId`.
+ *
+ * The front desk needs this to take a walk-in: previously only the customer
+ * could add a pet, so a staff booking dead-ended for anyone whose pet was not
+ * already on file.
+ */
 export async function POST(req: Request) {
   try {
     const user = await requireUser(req);
-    if (user.role !== "CUSTOMER") {
-      throw new ApiError("Only customers can register pets.", 403);
+    const onBehalf = user.role === "STAFF" || user.role === "ADMIN";
+    if (user.role !== "CUSTOMER" && !onBehalf) {
+      throw new ApiError("Only customers, staff and admins can register pets.", 403);
     }
     const body = await readBody(req);
-    const name = asString(body.name);
+
+    // Whose pet this is: the caller's own, or the customer a staff member names.
+    let ownerId = user.id;
+    if (onBehalf) {
+      const requested = asString(body.ownerId);
+      if (!requested) throw new ApiError("ownerId is required when registering a pet for a customer.", 400);
+      const owner = await db.user.findUnique({ where: { id: requested } });
+      if (!owner || !owner.active) throw new ApiError("Customer not found.", 404);
+      if (owner.role !== "CUSTOMER") throw new ApiError("Pets can only be registered to customer accounts.", 400);
+      ownerId = owner.id;
+    }
+
+    const name = asBoundedString(body.name, MAX_LEN.NAME, "Pet name");
     const type = asString(body.type);
-    const breed = asString(body.breed);
+    const breed = asBoundedString(body.breed, MAX_LEN.SHORT, "Breed");
     const gender = asString(body.gender);
-    const birthDate = asString(body.birthDate);
+    const birthDate = asBoundedString(body.birthDate, MAX_LEN.SHORT, "Birth date");
     const weight = asNumber(body.weight);
-    const color = asString(body.color);
+    const color = asBoundedString(body.color, MAX_LEN.SHORT, "Colour");
     const photo = asString(body.photo);
-    const medicalNotes = asString(body.medicalNotes);
+    const medicalNotes = asBoundedString(body.medicalNotes, MAX_LEN.LONG, "Medical notes");
     const vaccinationStatus = asString(body.vaccinationStatus);
 
     if (!name) throw new ApiError("Pet name is required.", 400);
@@ -79,7 +99,7 @@ export async function POST(req: Request) {
       data: {
         name,
         type,
-        ownerId: user.id,
+        ownerId,
         ...(breed !== undefined ? { breed } : {}),
         ...(gender !== undefined ? { gender } : {}),
         ...(birthDate !== undefined ? { birthDate } : {}),

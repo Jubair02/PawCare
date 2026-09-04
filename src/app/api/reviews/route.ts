@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { ApiError, getAuthUser, handleError, json, requireRole } from "@/lib/auth";
-import { REVIEW_INCLUDE, asString, pageMeta, readBody, readPage, shapeReview } from "@/app/api/_lib/shape";
+import { MAX_LEN, REVIEW_INCLUDE, asBoundedString, asString, pageMeta, readBody, readPage, shapeReview } from "@/app/api/_lib/shape";
 
 /**
  * GET /api/reviews — public default APPROVED.
@@ -38,11 +38,24 @@ export async function GET(req: Request) {
     if (providerId) where.providerId = providerId;
 
     const page = readPage(url);
-    const [reviews, total] = await Promise.all([
+
+    // Moderation tab counts, over the whole filtered set rather than the page.
+    const scope = { ...where };
+    delete (scope as { status?: string }).status;
+
+    const [reviews, total, byStatus] = await Promise.all([
       db.review.findMany({ where, include: REVIEW_INCLUDE, orderBy: { createdAt: "desc" }, ...page }),
       db.review.count({ where }),
+      db.review.groupBy({ by: ["status"], where: scope, _count: { _all: true } }),
     ]);
-    return json({ reviews: reviews.map(shapeReview), page: pageMeta(total, page) });
+
+    const counts: Record<string, number> = { all: 0 };
+    for (const row of byStatus) {
+      counts[row.status] = row._count._all;
+      counts.all += row._count._all;
+    }
+
+    return json({ reviews: reviews.map(shapeReview), page: pageMeta(total, page), counts });
   } catch (e) {
     return handleError(e);
   }
@@ -54,7 +67,7 @@ export async function POST(req: Request) {
     const user = await requireRole(req, "CUSTOMER");
     const body = await readBody(req);
     const appointmentId = asString(body.appointmentId);
-    const comment = asString(body.comment);
+    const comment = asBoundedString(body.comment, MAX_LEN.COMMENT, "Comment");
     const rating = typeof body.rating === "number" ? body.rating : typeof body.rating === "string" && body.rating.trim() !== "" ? Number(body.rating) : NaN;
 
     if (!appointmentId) throw new ApiError("appointmentId is required.", 400);

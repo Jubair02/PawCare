@@ -10,6 +10,14 @@ export interface AppState {
   view: string;
   selectedPetId: string | null;
   authMode: "login" | "register";
+  /**
+   * Bumped whenever notifications are marked read anywhere in the app. The
+   * shell badge and the Notifications page both watch it, so reading a
+   * notification on one no longer leaves the other showing a stale count.
+   * Deliberately not persisted — it is a within-session signal.
+   */
+  notificationsRevision: number;
+  notificationsChanged: () => void;
   login: (user: SessionUser, token: string) => void;
   logout: () => void;
   setView: (v: string) => void;
@@ -55,6 +63,9 @@ export const useAppStore = create<AppState>()(
       view: "landing",
       selectedPetId: null,
       authMode: "login",
+      notificationsRevision: 0,
+      notificationsChanged: () =>
+        set((s) => ({ notificationsRevision: s.notificationsRevision + 1 })),
       login: (user, token) => set({ user, token, view: homeViewForRole(user.role) }),
       logout: () => set({ user: null, token: null, view: "landing", selectedPetId: null }),
       setView: (view) => set({ view }),

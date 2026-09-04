@@ -42,12 +42,14 @@ export function AdminSettingsView() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<SettingsForm>(EMPTY_FORM);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const res = await apiFetch<{ setting: SettingDTO }>("/api/settings");
       setSetting(res.setting);
+      setLoadError(null);
       setForm({
         clinicName: res.setting.clinicName ?? "",
         address: res.setting.address ?? "",
@@ -58,8 +60,10 @@ export function AdminSettingsView() {
         slotMinutes: String(res.setting.slotMinutes ?? 60),
       });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to load settings");
+      const msg = e instanceof Error ? e.message : "Failed to load settings";
+      toast.error(msg);
       setSetting(null);
+      setLoadError(msg);
     } finally {
       setLoading(false);
     }
@@ -87,6 +91,10 @@ export function AdminSettingsView() {
       toast.error("Closing time must be after opening time.");
       return;
     }
+    if (!form.email.trim() && setting?.email) {
+      toast.error("The clinic email cannot be removed — enter a replacement address.");
+      return;
+    }
     setSaving(true);
     try {
       const res = await apiFetch<{ setting: SettingDTO }>("/api/settings", {
@@ -95,7 +103,9 @@ export function AdminSettingsView() {
           clinicName: form.clinicName.trim(),
           address: form.address.trim(),
           phone: form.phone.trim(),
-          email: form.email.trim(),
+          // The API validates any email it receives, so an untouched field must
+          // be omitted rather than sent as "" (which came back a 400).
+          ...(form.email.trim() ? { email: form.email.trim() } : {}),
           openTime: form.openTime,
           closeTime: form.closeTime,
           slotMinutes: slot,
@@ -122,6 +132,34 @@ export function AdminSettingsView() {
           <Skeleton className="h-80 rounded-2xl" />
         </div>
         <Skeleton className="h-14 rounded-2xl" />
+      </div>
+    );
+  }
+
+  // Without this branch a failed GET fell through to the form filled with
+  // EMPTY_FORM, so 09:00-17:00 / 60 min looked like the clinic's saved hours -
+  // and saving would have written those placeholder values for real.
+  if (loadError && !setting) {
+    return (
+      <div className="space-y-6">
+        <SectionHeader title="Settings" description="Clinic profile and booking schedule used across the platform.">
+          <Button variant="outline" onClick={() => void load()} disabled={loading} className="min-h-10">
+            <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /> Retry
+          </Button>
+        </SectionHeader>
+        <Card className="flex flex-col items-center gap-3 p-10 text-center">
+          <span className="rounded-full bg-rose-100 p-3 text-rose-600 dark:bg-rose-950/50 dark:text-rose-300">
+            <Info className="size-6" />
+          </span>
+          <div>
+            <p className="font-semibold">Could not load clinic settings</p>
+            <p className="mt-1 text-sm text-muted-foreground">{loadError}</p>
+          </div>
+          <p className="max-w-md text-xs text-muted-foreground">
+            The form is hidden on purpose: editing it now would overwrite the clinic&apos;s real hours with
+            placeholder defaults.
+          </p>
+        </Card>
       </div>
     );
   }

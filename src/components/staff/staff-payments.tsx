@@ -5,6 +5,16 @@ import { CircleCheck, HandCoins, Info, Loader2, Receipt, ReceiptText, RefreshCcw
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Card } from "@/components/ui/card";
 import {
   Select,
@@ -27,29 +37,15 @@ import { SectionHeader } from "@/components/shared/section-header";
 import { StatCard } from "@/components/shared/stat-card";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, errMsg } from "@/lib/api";
 import { ListNotice } from "@/components/shared/list-notice";
-import { PAYMENT_METHODS } from "@/lib/constants";
-import { formatBDT, formatDate, formatTime, timeAgo } from "@/lib/formatters";
+import { PAYMENT_METHODS, paymentMethodLabel } from "@/lib/constants";
+import { clinicToday, formatBDT, formatDate, formatInstantDate, formatInstantTime, timeAgo } from "@/lib/formatters";
 import type { PageMeta, PaymentDTO } from "@/lib/types";
 
 // Payment records are PENDING (cash awaiting collection), PAID or REFUNDED.
 // "UNPAID" was never a payment-record status, so that filter matched nothing.
 const STATUS_OPTIONS = ["PENDING", "PAID", "REFUNDED"];
-const METHOD_OPTIONS = ["CASH", "CARD", "MOBILE"];
-
-function todayStr(): string {
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
-}
-
-function errMsg(e: unknown): string {
-  return e instanceof Error ? e.message : "Something went wrong";
-}
-
-function methodLabel(method: string): string {
-  return PAYMENT_METHODS.find((m) => m.value === method)?.label ?? method;
-}
 
 export function StaffPaymentsView() {
   const [payments, setPayments] = useState<PaymentDTO[]>([]);
@@ -60,20 +56,9 @@ export function StaffPaymentsView() {
   const [page, setPage] = useState<PageMeta | null>(null);
 
   const [collectingId, setCollectingId] = useState<string | null>(null);
-
-  // The only path that turns a cash intent into revenue.
-  async function collectCash(p: PaymentDTO) {
-    setCollectingId(p.id);
-    try {
-      await apiFetch<{ payment: PaymentDTO }>(`/api/payments/${p.id}/collect`, { method: "PATCH" });
-      toast.success(`Collected ${formatBDT(p.amount)} from ${p.customer.name}`);
-      await load();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not record the collection");
-    } finally {
-      setCollectingId(null);
-    }
-  }
+  // Collecting cash is one-way for staff — only an admin can refund — so the
+  // button opens this confirmation instead of posting straight away.
+  const [collectTarget, setCollectTarget] = useState<PaymentDTO | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -87,19 +72,34 @@ export function StaffPaymentsView() {
     }
   }, []);
 
+  // The only path that turns a cash intent into revenue.
+  async function collectCash(p: PaymentDTO) {
+    setCollectingId(p.id);
+    try {
+      await apiFetch<{ payment: PaymentDTO }>(`/api/payments/${p.id}/collect`, { method: "PATCH" });
+      toast.success(`Collected ${formatBDT(p.amount)} from ${p.customer.name}`);
+      setCollectTarget(null);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not record the collection");
+    } finally {
+      setCollectingId(null);
+    }
+  }
+
   useEffect(() => {
     void load();
   }, [load]);
 
   const stats = useMemo(() => {
-    const today = todayStr();
+    const today = clinicToday();
     let collected = 0;
     let todayTotal = 0;
     let refunded = 0;
     for (const p of payments) {
       if (p.status === "PAID") {
         collected += p.amount;
-        if (p.paidAt.slice(0, 10) === today) todayTotal += p.amount;
+        if (formatInstantDate(p.paidAt) === today) todayTotal += p.amount;
       } else if (p.status === "REFUNDED") {
         refunded += p.amount;
       }
@@ -188,9 +188,9 @@ export function StaffPaymentsView() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="ALL">All methods</SelectItem>
-            {METHOD_OPTIONS.map((m) => (
-              <SelectItem key={m} value={m}>
-                {methodLabel(m)}
+            {PAYMENT_METHODS.map((m) => (
+              <SelectItem key={m.value} value={m.value}>
+                {m.label}
               </SelectItem>
             ))}
           </SelectContent>
@@ -241,10 +241,10 @@ export function StaffPaymentsView() {
                     <TableCell className="font-mono text-xs font-semibold">{p.invoiceId}</TableCell>
                     <TableCell>
                       <span className="block whitespace-nowrap text-sm">
-                        {formatDate(p.paidAt.slice(0, 10))}
+                        {formatDate(formatInstantDate(p.paidAt))}
                       </span>
                       <span className="whitespace-nowrap text-xs text-muted-foreground">
-                        {formatTime(p.paidAt.slice(11, 16))} · {timeAgo(p.paidAt)}
+                        {formatInstantTime(p.paidAt)} · {timeAgo(p.paidAt)}
                       </span>
                     </TableCell>
                     <TableCell>
@@ -261,7 +261,7 @@ export function StaffPaymentsView() {
                     <TableCell>{p.appointment.pet.name}</TableCell>
                     <TableCell className="text-right font-semibold">{formatBDT(p.amount)}</TableCell>
                     <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {methodLabel(p.method)}
+                      {paymentMethodLabel(p.method)}
                     </TableCell>
                     <TableCell className="font-mono text-[11px] text-muted-foreground">
                       {p.transactionId}
@@ -275,7 +275,7 @@ export function StaffPaymentsView() {
                           size="sm"
                           className="min-h-9 whitespace-nowrap"
                           disabled={collectingId === p.id}
-                          onClick={() => void collectCash(p)}
+                          onClick={() => setCollectTarget(p)}
                         >
                           {collectingId === p.id ? (
                             <Loader2 className="size-4 animate-spin" />
@@ -321,17 +321,58 @@ export function StaffPaymentsView() {
                   </div>
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t pt-3 text-xs text-muted-foreground">
                     <span>
-                      {methodLabel(p.method)} · {formatDate(p.paidAt.slice(0, 10))}{" "}
-                      {formatTime(p.paidAt.slice(11, 16))}
+                      {paymentMethodLabel(p.method)} · {formatDate(formatInstantDate(p.paidAt))}{" "}
+                      {formatInstantTime(p.paidAt)}
                     </span>
                     <span className="font-mono text-[11px]">{p.transactionId}</span>
                   </div>
+                  {p.status === "PENDING" ? (
+                    <Button
+                      className="mt-3 min-h-11 w-full"
+                      disabled={collectingId === p.id}
+                      onClick={() => setCollectTarget(p)}
+                    >
+                      {collectingId === p.id ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <HandCoins className="size-4" />
+                      )}
+                      Mark received
+                    </Button>
+                  ) : null}
                 </Card>
               </motion.div>
             ))}
           </div>
         </>
       )}
+
+      {/* Collect confirm — staff cannot reverse this; refunds are admin-only */}
+      <AlertDialog open={!!collectTarget} onOpenChange={(o) => !o && setCollectTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Record this payment as received?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {collectTarget
+                ? `${collectTarget.invoiceId} — confirm you have taken ${formatBDT(collectTarget.amount)} in ${paymentMethodLabel(collectTarget.method).toLowerCase()} from ${collectTarget.customer.name}. The invoice becomes PAID immediately, and only an admin can refund it.`
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!collectingId}>Not yet</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                if (collectTarget) void collectCash(collectTarget);
+              }}
+              disabled={!!collectingId}
+            >
+              {collectingId ? <Loader2 className="size-4 animate-spin" /> : <HandCoins className="size-4" />}
+              Confirm {collectTarget ? formatBDT(collectTarget.amount) : ""}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

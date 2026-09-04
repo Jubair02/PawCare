@@ -22,7 +22,9 @@ export const PAYMENT_METHOD_VALUES = ["CASH", "CARD", "MOBILE"] as const;
  * to pay at the counter but no money has moved yet, so it must not be counted as
  * revenue. Staff move it to PAID when they actually take the cash.
  */
-export const PAYMENT_RECORD_STATUSES = ["PENDING", "PAID", "REFUNDED"] as const;
+// CANCELLED = an uncollected cash record voided because the appointment was
+// cancelled. Distinct from REFUNDED, where money actually changed hands.
+export const PAYMENT_RECORD_STATUSES = ["PENDING", "PAID", "REFUNDED", "CANCELLED"] as const;
 
 /**
  * The appointment's view of payment. CASH_DUE means a cash payment is expected
@@ -30,6 +32,17 @@ export const PAYMENT_RECORD_STATUSES = ["PENDING", "PAID", "REFUNDED"] as const;
  * money has been received.
  */
 export const APPOINTMENT_PAYMENT_STATUSES = ["UNPAID", "CASH_DUE", "PAID", "REFUNDED"] as const;
+
+/**
+ * `specialty` is display metadata that must not contradict `role` — the booking
+ * rules are enforced on role. Providers may only ever be labelled as their own
+ * profession; nobody else carries a specialty at all.
+ */
+export function isValidSpecialtyForRole(role: string, specialty: string): boolean {
+  if (specialty === "") return true; // clearing it is always allowed
+  if (role === "VET" || role === "GROOMER") return specialty === role;
+  return false;
+}
 
 /** Cash is settled in person, so it cannot be self-served to PAID. */
 export function isPayNowMethod(method: string): boolean {

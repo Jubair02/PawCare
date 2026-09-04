@@ -55,6 +55,23 @@ const ROLE_BADGE: Record<Role, string> = {
   CUSTOMER: "bg-primary/10 text-primary border-primary/20",
 };
 
+/** Views that render without a session. Everything else requires a login. */
+function isPublicView(view: string): boolean {
+  return view === "landing" || view === "auth";
+}
+
+function SessionSplash() {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center bg-background">
+      <div className="flex h-16 w-16 animate-pulse items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-500 text-white shadow-lg">
+        <PawPrint className="size-8" />
+      </div>
+      <p className="mt-4 text-lg font-bold tracking-tight">PawCare</p>
+      <p className="text-xs text-muted-foreground">Loading your session…</p>
+    </div>
+  );
+}
+
 const VIEW_TITLE_OVERRIDES: Record<string, string> = {
   "cust-pet-detail": "Pet Details",
 };
@@ -72,6 +89,8 @@ function useShellNotifications(active: boolean, refreshKey: string) {
   const [notifications, setNotifications] = useState<NotificationDTO[]>([]);
   const [unread, setUnread] = useState(0);
   const [markingAll, setMarkingAll] = useState(false);
+  const revision = useAppStore((s) => s.notificationsRevision);
+  const notificationsChanged = useAppStore((s) => s.notificationsChanged);
 
   const load = useCallback(async () => {
     if (!active) return;
@@ -89,7 +108,9 @@ function useShellNotifications(active: boolean, refreshKey: string) {
     void load();
     const timer = setInterval(() => void load(), 30000);
     return () => clearInterval(timer);
-  }, [active, load, refreshKey]);
+    // `revision` pulls the badge back in step after the Notifications page (or
+    // this popover) marks something read, instead of waiting out the 30s poll.
+  }, [active, load, refreshKey, revision]);
 
   const markOne = useCallback(async (n: NotificationDTO) => {
     if (n.read) return;
@@ -100,10 +121,11 @@ function useShellNotifications(active: boolean, refreshKey: string) {
       });
       setNotifications((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
       setUnread((u) => Math.max(0, u - 1));
+      notificationsChanged();
     } catch {
       // silent
     }
-  }, []);
+  }, [notificationsChanged]);
 
   const markAll = useCallback(async () => {
     setMarkingAll(true);
@@ -114,12 +136,13 @@ function useShellNotifications(active: boolean, refreshKey: string) {
       });
       setNotifications((prev) => prev.map((x) => ({ ...x, read: true })));
       setUnread(0);
+      notificationsChanged();
     } catch {
       // silent
     } finally {
       setMarkingAll(false);
     }
-  }, []);
+  }, [notificationsChanged]);
 
   return { notifications, unread, markOne, markAll, markingAll };
 }
@@ -196,10 +219,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       .catch(() => undefined);
   }, []);
 
-  // Role guard: force views back into the user's role prefix
+  // Auth + role guard.
+  // Logged out on a private view (a stale persisted `view`, or a hand-crafted
+  // deep link) used to fall straight through to `children`, rendering an admin
+  // screen with no chrome and 401ing fetches. Send those to the login screen.
   useEffect(() => {
-    if (!mounted || !user) return;
-    if (view === "landing" || view === "auth") return;
+    if (!mounted) return;
+    if (!user) {
+      if (!isPublicView(view)) setView("auth");
+      return;
+    }
+    if (isPublicView(view)) return;
     if (!view.startsWith(rolePrefixFor(user.role))) {
       setView(homeViewForRole(user.role));
     }
@@ -211,20 +241,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   );
 
   // Branded splash until the persisted store hydrates
-  if (!mounted) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-background">
-        <div className="flex h-16 w-16 animate-pulse items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-500 text-white shadow-lg">
-          <PawPrint className="size-8" />
-        </div>
-        <p className="mt-4 text-lg font-bold tracking-tight">PawCare</p>
-        <p className="text-xs text-muted-foreground">Loading your session…</p>
-      </div>
-    );
+  if (!mounted) return <SessionSplash />;
+
+  // Logged out on a private view: the effect above is redirecting to `auth`.
+  // Show the splash rather than `children` so the private view never paints.
+  if (!user && !isPublicView(view)) {
+    return <SessionSplash />;
   }
 
   // Public surface: landing / auth render themselves (also when logged out)
-  if (!user || view === "landing" || view === "auth") {
+  if (!user || isPublicView(view)) {
     return <>{children}</>;
   }
 
@@ -240,6 +266,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     view === item.view || (item.view === "cust-pets" && view === "cust-pet-detail");
 
   const handleLogout = () => {
+    // Kill the session server-side first; clearing local state alone would
+    // leave a working token behind.
+    void apiFetch<{ ok: boolean }>("/api/auth/logout", { method: "POST" }).catch(() => undefined);
     logout();
     toast.success("Logged out — see you soon!");
   };
@@ -353,7 +382,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     item={{ view: "logout", label: "Log out", icon: LogOut }}
                     active={false}
                     onSelect={handleLogout}
-                    className="text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:bg-rose-950/40 hover:text-rose-700 dark:text-rose-200"
+                    className="text-rose-600 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40 hover:text-rose-700 dark:hover:text-rose-200"
                   />
                 </nav>
               </SheetContent>

@@ -4,11 +4,22 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CalendarDays,
   Eye,
+  Loader2,
   MoreHorizontal,
   RefreshCw,
   Search,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,7 +57,7 @@ import {
 import { EmptyState } from "@/components/shared/empty-state";
 import { SectionHeader } from "@/components/shared/section-header";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { apiFetch } from "@/lib/api";
+import { apiFetch, isAbortError } from "@/lib/api";
 import { ListNotice } from "@/components/shared/list-notice";
 import { STATUS_FLOW, allowedTransitions } from "@/lib/constants";
 import { formatBDT, formatDateShort, formatTime, petEmoji } from "@/lib/formatters";
@@ -62,6 +73,18 @@ const TRANSITION_LABELS: Record<string, string> = {
   CANCELLED: "Cancel appointment",
 };
 
+/**
+ * Transitions the customer feels and the admin cannot walk back: CANCELLED
+ * frees the slot and voids the booking, COMPLETED closes it out for billing.
+ * Both sat one click deep in a dropdown, next to the harmless ones.
+ */
+const CONFIRM_TRANSITIONS = new Set(["CANCELLED", "COMPLETED"]);
+
+const CONFIRM_COPY: Record<string, { title: string; verb: string; danger: boolean }> = {
+  CANCELLED: { title: "Cancel this appointment?", verb: "Cancel appointment", danger: true },
+  COMPLETED: { title: "Mark this appointment completed?", verb: "Mark completed", danger: false },
+};
+
 /* --------------------------------- view ----------------------------------- */
 
 export function AdminAppointmentsView() {
@@ -72,31 +95,42 @@ export function AdminAppointmentsView() {
   const [search, setSearch] = useState("");
   const [details, setDetails] = useState<AppointmentDTO | null>(null);
   const [mutatingId, setMutatingId] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<{ a: AppointmentDTO; next: string } | null>(null);
 
   const [page, setPage] = useState<PageMeta | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (statusFilter !== "ALL") params.set("status", statusFilter);
-      if (dateFilter) params.set("date", dateFilter);
-      const qs = params.toString();
-      const res = await apiFetch<{ appointments: AppointmentDTO[]; page?: PageMeta }>(
-        `/api/appointments${qs ? `?${qs}` : ""}`
-      );
-      setAppts(res.appointments);
-      setPage(res.page ?? null);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to load appointments");
-      setAppts(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [statusFilter, dateFilter]);
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      setLoading(true);
+      try {
+        const params = new URLSearchParams();
+        if (statusFilter !== "ALL") params.set("status", statusFilter);
+        if (dateFilter) params.set("date", dateFilter);
+        const qs = params.toString();
+        const res = await apiFetch<{ appointments: AppointmentDTO[]; page?: PageMeta }>(
+          `/api/appointments${qs ? `?${qs}` : ""}`,
+          { signal }
+        );
+        setAppts(res.appointments);
+        setPage(res.page ?? null);
+      } catch (e) {
+        if (isAbortError(e)) return;
+        toast.error(e instanceof Error ? e.message : "Failed to load appointments");
+        setAppts(null);
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [statusFilter, dateFilter]
+  );
 
+  // Status and date are server-side params, so changing either starts a new
+  // request. Aborting the old one stops a slow reply for the previous filter
+  // from landing last and overwriting the list the admin is now looking at.
   useEffect(() => {
-    void load();
+    const ac = new AbortController();
+    void load(ac.signal);
+    return () => ac.abort();
   }, [load]);
 
   // Client-side search across customer / pet / service / provider
@@ -120,6 +154,15 @@ export function AdminAppointmentsView() {
 
   /* ------------------------------ mutations ------------------------------- */
 
+  /** Menu entry point: irreversible transitions go via the confirm dialog. */
+  function requestStatus(a: AppointmentDTO, next: string) {
+    if (CONFIRM_TRANSITIONS.has(next)) {
+      setConfirm({ a, next });
+      return;
+    }
+    void handleStatus(a, next);
+  }
+
   async function handleStatus(a: AppointmentDTO, next: string) {
     setMutatingId(a.id);
     try {
@@ -131,6 +174,7 @@ export function AdminAppointmentsView() {
       toast.error(e instanceof Error ? e.message : "Could not update appointment");
     } finally {
       setMutatingId(null);
+      setConfirm(null);
     }
   }
 
@@ -243,7 +287,7 @@ export function AdminAppointmentsView() {
                     key={a.id}
                     a={a}
                     mutatingId={mutatingId}
-                    onStatus={handleStatus}
+                    onStatus={requestStatus}
                     onDetails={() => setDetails(a)}
                   />
                 ))}
@@ -258,7 +302,7 @@ export function AdminAppointmentsView() {
                 key={a.id}
                 a={a}
                 mutatingId={mutatingId}
-                onStatus={handleStatus}
+                onStatus={requestStatus}
                 onDetails={() => setDetails(a)}
               />
             ))}
@@ -338,6 +382,42 @@ export function AdminAppointmentsView() {
           ) : null}
         </DialogContent>
       </Dialog>
+
+      {/* Status confirm — cancel and complete are not reversible from here */}
+      <AlertDialog open={!!confirm} onOpenChange={(o) => !o && setConfirm(null)}>
+        <AlertDialogContent>
+          {confirm ? (
+            <>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{CONFIRM_COPY[confirm.next]?.title ?? "Change this appointment?"}</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {confirm.a.service.name} for {confirm.a.pet.name} ({confirm.a.customer.name}) on{" "}
+                  {formatDateShort(confirm.a.date)} at {formatTime(confirm.a.time)}
+                  {confirm.next === "CANCELLED"
+                    ? " will be cancelled and the slot released. The customer is notified, and you cannot un-cancel it here."
+                    : " will be closed out as completed and become billable. Only a cancellation can follow it."}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={mutatingId === confirm.a.id}>Keep as is</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void handleStatus(confirm.a, confirm.next);
+                  }}
+                  disabled={mutatingId === confirm.a.id}
+                  className={
+                    CONFIRM_COPY[confirm.next]?.danger ? "bg-rose-600 text-white hover:bg-rose-700" : undefined
+                  }
+                >
+                  {mutatingId === confirm.a.id ? <Loader2 className="size-4 animate-spin" /> : null}
+                  {CONFIRM_COPY[confirm.next]?.verb ?? "Continue"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </>
+          ) : null}
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -380,7 +460,7 @@ function ActionsMenu({ a, mutatingId, onStatus, onDetails }: RowProps) {
               <DropdownMenuItem
                 key={next}
                 onClick={() => onStatus(a, next)}
-                className={next === "CANCELLED" ? "text-rose-600 dark:text-rose-300 focus:text-rose-700 dark:text-rose-200" : ""}
+                className={next === "CANCELLED" ? "text-rose-600 dark:text-rose-300 focus:text-rose-700 dark:focus:text-rose-200" : ""}
               >
                 {next === "CANCELLED" ? "✕" : "→"} {TRANSITION_LABELS[next] ?? next}
               </DropdownMenuItem>

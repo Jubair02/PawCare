@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { ApiError, getAuthUser, handleError, json, requireRole } from "@/lib/auth";
 import type { Service } from "@prisma/client";
-import { SERVICE_CATEGORIES, asNumber, asString, readBody, serviceRatings, shapeService } from "@/app/api/_lib/shape";
+import { MAX_LEN, SERVICE_CATEGORIES, asBoundedString, asNumber, asString, readBody, serviceRatings, shapeService } from "@/app/api/_lib/shape";
 
 /**
  * GET /api/services — public. ?active=true&category=
@@ -53,12 +53,12 @@ export async function POST(req: Request) {
   try {
     await requireRole(req, "ADMIN");
     const body = await readBody(req);
-    const name = asString(body.name);
+    const name = asBoundedString(body.name, MAX_LEN.NAME, "Service name");
     const category = asString(body.category);
-    const description = asString(body.description);
+    const description = asBoundedString(body.description, MAX_LEN.LONG, "Description");
     const duration = asNumber(body.duration);
     const price = asNumber(body.price);
-    const icon = asString(body.icon);
+    const icon = asBoundedString(body.icon, MAX_LEN.SHORT, "Icon");
     const active = body.active === undefined ? true : body.active === true || body.active === "true";
 
     if (!name) throw new ApiError("Service name is required.", 400);

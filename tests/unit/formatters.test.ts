@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { dateRelation, formatBDT, formatDate, formatInstantDate, formatTime, initials } from "@/lib/formatters";
+import {
+  clinicToday,
+  dateRelation,
+  formatBDT,
+  formatDate,
+  formatInstantDate,
+  formatInstantTime,
+  formatTime,
+  initials,
+} from "@/lib/formatters";
 
 describe("formatInstantDate", () => {
   it("renders the clinic-local date, not the UTC one", () => {
@@ -50,12 +59,33 @@ describe("formatBDT", () => {
   });
 });
 
+describe("formatInstantTime", () => {
+  it("renders the clinic wall clock, not the UTC one", () => {
+    // 08:00Z is 2 PM in Dhaka. Slicing the ISO string showed 8:00 AM.
+    expect(formatInstantTime("2025-06-15T08:00:00.000Z")).toBe("2:00 PM");
+  });
+
+  it("returns an empty string for empty or invalid input", () => {
+    expect(formatInstantTime("")).toBe("");
+    expect(formatInstantTime("not-a-date")).toBe("");
+  });
+});
+
+describe("clinicToday", () => {
+  it("agrees with formatInstantDate on the current instant", () => {
+    expect(clinicToday()).toBe(formatInstantDate(new Date().toISOString()));
+  });
+
+  it("is a yyyy-MM-dd string", () => {
+    expect(clinicToday()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
 describe("dateRelation", () => {
-  it("classifies past, today and future", () => {
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-    expect(dateRelation(today)).toBe("today");
+  it("classifies past, today and future against clinic today", () => {
+    // Anchored to clinic time, not the browser's: a machine set to UTC-6 used
+    // to call the clinic's today "tomorrow" for six hours a day.
+    expect(dateRelation(clinicToday())).toBe("today");
     expect(dateRelation("2020-01-01")).toBe("past");
     expect(dateRelation("2099-01-01")).toBe("future");
   });

@@ -1,7 +1,8 @@
 import { db } from "@/lib/db";
 import { ApiError, handleError, json, publicUser } from "@/lib/auth";
 import { hashPassword } from "@/lib/password";
-import { EMAIL_RE, asString, readBody } from "@/app/api/_lib/shape";
+import { createSession } from "@/lib/session";
+import { EMAIL_RE, MAX_LEN, asBoundedString, asString, readBody } from "@/app/api/_lib/shape";
 import { HOUR, clientIp, enforce } from "@/lib/rate-limit";
 
 export async function POST(req: Request) {
@@ -9,10 +10,10 @@ export async function POST(req: Request) {
     enforce(`register:ip:${clientIp(req)}`, 5, HOUR, "Too many accounts created from this device.");
 
     const body = await readBody(req);
-    const name = asString(body.name);
-    const email = asString(body.email)?.toLowerCase();
-    const password = asString(body.password);
-    const phone = asString(body.phone);
+    const name = asBoundedString(body.name, MAX_LEN.NAME, "Name");
+    const email = asBoundedString(body.email, MAX_LEN.EMAIL, "Email")?.toLowerCase();
+    const password = asBoundedString(body.password, MAX_LEN.PASSWORD, "Password");
+    const phone = asBoundedString(body.phone, MAX_LEN.PHONE, "Phone");
 
     if (!name) throw new ApiError("Name is required.", 400);
     if (!email || !EMAIL_RE.test(email)) throw new ApiError("A valid email is required.", 400);
@@ -23,9 +24,24 @@ export async function POST(req: Request) {
 
     // Registration always creates a CUSTOMER account.
     const user = await db.user.create({
-      data: { name, email, password: hashPassword(password), role: "CUSTOMER", phone: phone ?? null },
+      data: {
+        name,
+        email,
+        password: await hashPassword(password),
+        role: "CUSTOMER",
+        phone: phone ?? null,
+      },
     });
-    return json({ user: publicUser(user), token: user.id }, 201);
+
+    const session = await createSession(user.id, req.headers.get("user-agent"));
+    return json(
+      {
+        user: publicUser(user),
+        token: session.token,
+        expiresAt: session.expiresAt.toISOString(),
+      },
+      201,
+    );
   } catch (e) {
     return handleError(e);
   }
