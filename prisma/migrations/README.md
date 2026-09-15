@@ -5,15 +5,32 @@ no history and no rollback. It is now under migration control.
 
 ## Existing database (the current Neon instance)
 
-Its tables already exist but were created by `db push`, so the migration has to be
-baselined. Run once:
+Its tables already exist but were created by `db push`, so the migrations have to
+be baselined. Run once:
 
 ```bash
-npx prisma db push          # bring the live schema up to date (adds the new indexes)
+npm run db:baseline
+```
+
+which is:
+
+```bash
+npx prisma db push          # bring the live schema up to date (adds the new indexes
+                            # and the Session table)
 npx prisma migrate resolve --applied 20250901000000_init
+npx prisma migrate resolve --applied 20250902000000_add_sessions
 ```
 
 After that the database and the migration history agree.
+
+Every migration already represented in the live schema must be resolved, not just
+the first. `db push` creates the `Session` table without recording
+`20250902000000_add_sessions`, so skipping that second `resolve` leaves a later
+`migrate deploy` trying to `CREATE TABLE "Session"` a second time, which fails.
+
+Until `Session` exists, **every login fails**: the password check passes and then
+`createSession()` cannot write its row, so `/api/auth/login` returns a 500 and the
+UI shows "Something went wrong. Please try again.".
 
 ## New database
 
