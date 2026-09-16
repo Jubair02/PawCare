@@ -20,8 +20,14 @@ import { describeDbFailure, json } from "@/lib/auth";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  // Shape checks only — booleans derived from the value, never the value. A
+  // connection string pasted together with its surrounding quotes is truthy but
+  // not well formed, and that is the single most common dashboard mistake, so
+  // it is worth catching before the database is ever contacted.
+  const databaseUrl = process.env.DATABASE_URL ?? "";
   const env = {
-    databaseUrlConfigured: Boolean(process.env.DATABASE_URL),
+    databaseUrlConfigured: Boolean(databaseUrl),
+    databaseUrlWellFormed: /^postgres(ql)?:\/\//.test(databaseUrl),
     directUrlConfigured: Boolean(process.env.DIRECT_URL),
   };
 
@@ -37,6 +43,7 @@ export async function GET() {
         ...env,
         database: "unreachable",
         code: failure?.code ?? "DB_ERROR",
+        prismaCode: failure?.prismaCode ?? null,
         hint:
           failure?.hint ??
           "The database could not be queried. Check DATABASE_URL in this environment.",

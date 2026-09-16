@@ -55,28 +55,63 @@ export function json(data: unknown, status = 200) {
 }
 
 /**
+ * Narrows a Prisma start-up failure to an actionable cause.
+ *
+ * Prisma leaves `errorCode` undefined for most connection failures, so the
+ * message is the only signal available. Matching on it is coarse but stable
+ * enough for the three mistakes that actually happen, and the caller returns
+ * only the mapped hint — never Prisma's own text, which embeds the host.
+ */
+function classifyInitError(message: string): { code: string; hint: string } {
+  if (/must start with the protocol|error validating datasource/i.test(message)) {
+    return {
+      code: "DB_URL_MALFORMED",
+      hint: "DATABASE_URL is not a valid connection string. The usual cause is pasting the value together with its surrounding double quotes, or a truncated or newline-wrapped paste.",
+    };
+  }
+  if (/authentication failed/i.test(message)) {
+    return {
+      code: "DB_AUTH_REJECTED",
+      hint: "The database rejected these credentials. Either the password was rotated after this value was set, or the host points at a Neon endpoint or branch that no longer exists.",
+    };
+  }
+  if (/can't reach database server|timed out|connection refused/i.test(message)) {
+    return {
+      code: "DB_UNREACHABLE",
+      hint: "The database host did not respond. The Neon compute may be suspended, or an IP allowlist may be blocking this deployment.",
+    };
+  }
+  return {
+    code: "DB_UNAVAILABLE",
+    hint: "DATABASE_URL is set but the database could not be reached.",
+  };
+}
+
+/**
  * Classifies the deployment-level database failures that are otherwise
  * indistinguishable from an application bug.
  *
- * Both times login broke in production the cause was environmental — first the
- * `Session` table was missing (migrations never baselined), then the database
- * credentials were absent — yet every one of those requests returned the same
- * opaque "Something went wrong" 500. Naming the failure mode costs nothing and
- * turns a log-diving exercise into a single reading of `/api/health`.
+ * Login has now broken in production twice for unrelated environmental reasons
+ * — first the `Session` table was missing because migrations were never
+ * baselined, then the deployment's own credentials stopped working — and both
+ * times every request returned the same opaque "Something went wrong" 500.
+ * Naming the failure mode costs nothing and turns a log-diving exercise into a
+ * single reading of `/api/health`.
  *
  * Returns null for ordinary application errors.
  */
-export function describeDbFailure(e: unknown): { code: string; hint: string } | null {
-  // Thrown when the client cannot start at all: DATABASE_URL missing, malformed
-  // or unreachable. On Vercel this almost always means the environment variable
-  // was never set, because `.env` is git-ignored and never leaves the machine.
+export function describeDbFailure(
+  e: unknown
+): { code: string; prismaCode?: string; hint: string } | null {
+  // Thrown when the client cannot start at all: DATABASE_URL missing, malformed,
+  // rejected or unreachable. `.env` is git-ignored and never leaves the machine,
+  // so a hosted deployment depends entirely on its own environment settings.
   if (e instanceof Prisma.PrismaClientInitializationError) {
-    return {
-      code: "DB_UNAVAILABLE",
-      hint: process.env.DATABASE_URL
-        ? "DATABASE_URL is set but the database could not be reached."
-        : "DATABASE_URL is not set in this environment.",
-    };
+    if (!process.env.DATABASE_URL) {
+      return { code: "DB_NOT_CONFIGURED", hint: "DATABASE_URL is not set in this environment." };
+    }
+    const { code, hint } = classifyInitError(e.message);
+    return { code, prismaCode: e.errorCode, hint };
   }
   // P2021: table does not exist. P2022: column does not exist. Either means the
   // deployed schema is behind the code — migrations have not been applied.
