@@ -17,7 +17,10 @@ export interface AppState {
    * Deliberately not persisted — it is a within-session signal.
    */
   notificationsRevision: number;
+  /** Desktop sidebar collapsed to icons only. Persisted, so it survives reloads. */
+  sidebarCollapsed: boolean;
   notificationsChanged: () => void;
+  setSidebarCollapsed: (v: boolean) => void;
   login: (user: SessionUser, token: string) => void;
   logout: () => void;
   setView: (v: string) => void;
@@ -64,8 +67,10 @@ export const useAppStore = create<AppState>()(
       selectedPetId: null,
       authMode: "login",
       notificationsRevision: 0,
+      sidebarCollapsed: false,
       notificationsChanged: () =>
         set((s) => ({ notificationsRevision: s.notificationsRevision + 1 })),
+      setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),
       login: (user, token) => set({ user, token, view: homeViewForRole(user.role) }),
       logout: () => set({ user: null, token: null, view: "landing", selectedPetId: null }),
       setView: (view) => set({ view }),
@@ -81,6 +86,7 @@ export const useAppStore = create<AppState>()(
         view: s.view,
         selectedPetId: s.selectedPetId,
         authMode: s.authMode,
+        sidebarCollapsed: s.sidebarCollapsed,
       }),
     }
   )

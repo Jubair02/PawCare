@@ -5,6 +5,8 @@ import {
   Bell,
   LogOut,
   Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
   PawPrint,
   Phone,
   User as UserIcon,
@@ -29,6 +31,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Sheet,
   SheetContent,
@@ -168,27 +176,44 @@ function NavButton({
   active,
   onSelect,
   className,
+  collapsed = false,
 }: {
   item: NavItem;
   active: boolean;
   onSelect: () => void;
   className?: string;
+  /** Icon-only rendering for the collapsed desktop sidebar. */
+  collapsed?: boolean;
 }) {
   const Icon = item.icon;
-  return (
+  const button = (
     <button
       type="button"
       onClick={onSelect}
       aria-current={active ? "page" : undefined}
+      // Collapsed buttons keep their accessible name, which the visible label
+      // would otherwise have provided.
+      aria-label={collapsed ? item.label : undefined}
+      title={undefined}
       className={cn(
-        "flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-medium transition-colors",
+        "flex min-h-11 w-full items-center rounded-xl text-sm font-medium transition-colors",
+        collapsed ? "justify-center px-0" : "gap-3 px-3",
         active ? "bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted hover:text-foreground",
         className
       )}
     >
       <Icon className={cn("size-4 shrink-0", active && "text-primary")} />
-      <span className="truncate">{item.label}</span>
+      {!collapsed ? <span className="truncate">{item.label}</span> : null}
     </button>
+  );
+
+  if (!collapsed) return button;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="right">{item.label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -203,6 +228,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const view = useAppStore((s) => s.view);
   const setView = useAppStore((s) => s.setView);
   const logout = useAppStore((s) => s.logout);
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
+  const setSidebarCollapsed = useAppStore((s) => s.setSidebarCollapsed);
 
   // Hydration flag: false on the server & first (hydration) render, true afterwards.
   // Gates rendering until the persisted zustand store has rehydrated on the client.
@@ -295,47 +322,63 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen w-full">
       {/* Desktop sidebar */}
-      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r bg-sidebar md:flex">
-        <div className="p-4">
-          <button
-            type="button"
-            onClick={() => go(homeViewForRole(role))}
-            className="rounded-lg text-left"
-            aria-label="Go to dashboard"
+      <TooltipProvider delayDuration={200}>
+        <aside
+          className={cn(
+            "sticky top-0 hidden h-screen shrink-0 flex-col border-r bg-sidebar transition-[width] duration-200 ease-out md:flex",
+            sidebarCollapsed ? "w-[4.5rem]" : "w-64"
+          )}
+        >
+          <div className={cn("p-4", sidebarCollapsed && "flex justify-center px-0")}>
+            <button
+              type="button"
+              onClick={() => go(homeViewForRole(role))}
+              className="rounded-lg text-left"
+              aria-label="Go to dashboard"
+            >
+              <BrandMark compact={sidebarCollapsed} />
+            </button>
+          </div>
+          <nav
+            aria-label="Main navigation"
+            className={cn(
+              "min-h-0 flex-1 space-y-1 overflow-y-auto pb-4 scrollbar-thin",
+              sidebarCollapsed ? "px-2" : "px-3"
+            )}
           >
-            <BrandMark />
-          </button>
-        </div>
-        <nav aria-label="Main navigation" className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-4 scrollbar-thin">
-          {items.map((item) => (
-            <NavButton key={item.view} item={item} active={isActive(item)} onSelect={() => go(item.view)} />
-          ))}
-        </nav>
-        <div className="border-t p-3">
-          <div className="flex items-center gap-3 rounded-xl p-2">
-            <Avatar className="h-9 w-9 border">
-              <AvatarFallback className="bg-primary/10 text-xs font-semibold text-primary">
-                {initials(user.name)}
-              </AvatarFallback>
-            </Avatar>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold">{user.name}</p>
-              <Badge variant="outline" className={cn("mt-0.5 px-1.5 py-0 text-[10px]", ROLE_BADGE[role])}>
-                {role}
-              </Badge>
-            </div>
+            {items.map((item) => (
+              <NavButton
+                key={item.view}
+                item={item}
+                active={isActive(item)}
+                onSelect={() => go(item.view)}
+                collapsed={sidebarCollapsed}
+              />
+            ))}
+          </nav>
+          {/* The account block that used to sit here was a duplicate: the topbar
+              menu already carries the same avatar, name, role badge and log out. */}
+          <div className={cn("border-t p-3", sidebarCollapsed && "px-2")}>
             <Button
               variant="ghost"
-              size="icon"
-              className="h-9 w-9 shrink-0 text-muted-foreground hover:text-rose-600 dark:text-rose-300"
-              onClick={handleLogout}
-              aria-label="Log out"
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-expanded={!sidebarCollapsed}
+              className={cn(
+                "min-h-11 w-full text-muted-foreground hover:text-foreground",
+                sidebarCollapsed ? "justify-center px-0" : "justify-start gap-3 px-3"
+              )}
             >
-              <LogOut className="size-4" />
+              {sidebarCollapsed ? (
+                <PanelLeftOpen className="size-4 shrink-0" />
+              ) : (
+                <PanelLeftClose className="size-4 shrink-0" />
+              )}
+              {!sidebarCollapsed ? <span className="truncate text-sm font-medium">Collapse</span> : null}
             </Button>
           </div>
-        </div>
-      </aside>
+        </aside>
+      </TooltipProvider>
 
       {/* Right column */}
       <div className="flex min-h-screen min-w-0 flex-1 flex-col">
