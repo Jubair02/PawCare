@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { ApiError, handleError, json } from "@/lib/auth";
+import { ApiError, handleError, json, publicCacheHeaders } from "@/lib/auth";
 import { asString, providerRatings } from "@/app/api/_lib/shape";
 
 /** GET /api/providers — public list of active VET/GROOMER users with approved-review ratings. */
@@ -19,26 +19,42 @@ export async function GET(req: Request) {
         active: true,
         role: specialty ? specialty : { in: ["VET", "GROOMER"] },
       },
+      // Only the columns the response below actually uses. Selecting whole rows
+      // pulled every provider's bcrypt hash across the wire on a public request.
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        specialty: true,
+        role: true,
+        bio: true,
+        phone: true,
+        active: true,
+      },
       orderBy: { name: "asc" },
     });
 
     const ratings = await providerRatings(providers.map((p) => p.id));
-    return json({
-      providers: providers.map((p) => {
-        const agg = ratings.get(p.id);
-        return {
-          id: p.id,
-          name: p.name,
-          email: p.email,
-          specialty: p.specialty ?? p.role,
-          bio: p.bio,
-          phone: p.phone,
-          active: p.active,
-          rating: agg?.rating ?? null,
-          reviewCount: agg?.reviewCount ?? 0,
-        };
-      }),
-    });
+    return json(
+      {
+        providers: providers.map((p) => {
+          const agg = ratings.get(p.id);
+          return {
+            id: p.id,
+            name: p.name,
+            email: p.email,
+            specialty: p.specialty ?? p.role,
+            bio: p.bio,
+            phone: p.phone,
+            active: p.active,
+            rating: agg?.rating ?? null,
+            reviewCount: agg?.reviewCount ?? 0,
+          };
+        }),
+      },
+      200,
+      publicCacheHeaders(req)
+    );
   } catch (e) {
     return handleError(e);
   }

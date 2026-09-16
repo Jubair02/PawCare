@@ -230,16 +230,21 @@ export function LandingView() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
-    apiFetch<{ services: ServiceDTO[] }>("/api/services?active=true")
+    // All four are public and identical for every visitor, so they are marked
+    // shareable: the browser may cache them, and the `/api/settings` call the
+    // app shell makes at the same moment collapses into this one.
+    apiFetch<{ services: ServiceDTO[] }>("/api/services?active=true", { shared: true })
       .then((r) => setServices(r.services))
       .catch(() => setServices([]));
-    apiFetch<{ providers: ProviderDTO[] }>("/api/providers")
+    apiFetch<{ providers: ProviderDTO[] }>("/api/providers", { shared: true })
       .then((r) => setProviders(r.providers))
       .catch(() => setProviders([]));
-    apiFetch<{ reviews: ReviewDTO[] }>("/api/reviews")
+    // Only six are rendered, and the endpoint already returns newest first, so
+    // asking for six is the same list the client used to slice out of 200.
+    apiFetch<{ reviews: ReviewDTO[] }>("/api/reviews?limit=6", { shared: true })
       .then((r) => setReviews(r.reviews.slice(0, 6)))
       .catch(() => setReviews([]));
-    apiFetch<{ setting: SettingDTO }>("/api/settings")
+    apiFetch<{ setting: SettingDTO }>("/api/settings", { shared: true })
       .then((r) => setSetting(r.setting))
       .catch(() => undefined);
   }, []);

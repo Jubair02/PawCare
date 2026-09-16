@@ -12,6 +12,10 @@ const geistSans = Geist({
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+  // Only invoice IDs and the error page use the mono face. Preloading it made
+  // every visitor fetch a font the landing page never paints; without the
+  // preload hint the browser still fetches it, but only where it is used.
+  preload: false,
 });
 
 export const metadata: Metadata = {

@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { ApiError, getAuthUser, handleError, json, requireRole } from "@/lib/auth";
+import { ApiError, getAuthUser, handleError, json, publicCacheHeaders, requireRole } from "@/lib/auth";
 import type { Service } from "@prisma/client";
 import { MAX_LEN, SERVICE_CATEGORIES, asBoundedString, asNumber, asString, readBody, serviceRatings, shapeService } from "@/app/api/_lib/shape";
 
@@ -42,7 +42,7 @@ export async function GET(req: Request) {
     const shaped = services.map((s) =>
       shapeService(s as Service & { _count?: { appointments: number } }, ratings.get(s.id)),
     );
-    return json({ services: shaped });
+    return json({ services: shaped }, 200, publicCacheHeaders(req));
   } catch (e) {
     return handleError(e);
   }

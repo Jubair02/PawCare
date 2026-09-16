@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { ApiError, handleError, json, requireRole } from "@/lib/auth";
-import { REVIEW_INCLUDE, REVIEW_STATUSES, asString, readBody, shapeReview } from "@/app/api/_lib/shape";
+import { REVIEW_SELECT, REVIEW_STATUSES, asString, readBody, shapeReview } from "@/app/api/_lib/shape";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -20,7 +20,7 @@ export async function PATCH(req: Request, ctx: Ctx) {
     }
 
     await db.review.update({ where: { id }, data: { status } });
-    const full = await db.review.findUnique({ where: { id }, include: REVIEW_INCLUDE });
+    const full = await db.review.findUnique({ where: { id }, select: REVIEW_SELECT });
     if (!full) throw new ApiError("Review could not be loaded.", 500);
     return json({ review: shapeReview(full) });
   } catch (e) {

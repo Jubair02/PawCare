@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
-import { ApiError, getAuthUser, handleError, json, requireRole } from "@/lib/auth";
-import { MAX_LEN, REVIEW_INCLUDE, asBoundedString, asString, pageMeta, readBody, readPage, shapeReview } from "@/app/api/_lib/shape";
+import { ApiError, getAuthUser, handleError, json, publicCacheHeaders, requireRole } from "@/lib/auth";
+import { MAX_LEN, REVIEW_SELECT, asBoundedString, asString, pageMeta, readBody, readPage, shapeReview } from "@/app/api/_lib/shape";
 
 /**
  * GET /api/reviews — public default APPROVED.
@@ -44,7 +44,7 @@ export async function GET(req: Request) {
     delete (scope as { status?: string }).status;
 
     const [reviews, total, byStatus] = await Promise.all([
-      db.review.findMany({ where, include: REVIEW_INCLUDE, orderBy: { createdAt: "desc" }, ...page }),
+      db.review.findMany({ where, select: REVIEW_SELECT, orderBy: { createdAt: "desc" }, ...page }),
       db.review.count({ where }),
       db.review.groupBy({ by: ["status"], where: scope, _count: { _all: true } }),
     ]);
@@ -55,7 +55,11 @@ export async function GET(req: Request) {
       counts.all += row._count._all;
     }
 
-    return json({ reviews: reviews.map(shapeReview), page: pageMeta(total, page), counts });
+    return json(
+      { reviews: reviews.map(shapeReview), page: pageMeta(total, page), counts },
+      200,
+      publicCacheHeaders(req)
+    );
   } catch (e) {
     return handleError(e);
   }
@@ -103,7 +107,7 @@ export async function POST(req: Request) {
       },
     });
 
-    const full = await db.review.findUnique({ where: { appointmentId }, include: REVIEW_INCLUDE });
+    const full = await db.review.findUnique({ where: { appointmentId }, select: REVIEW_SELECT });
     if (!full) throw new ApiError("Review could not be loaded.", 500);
     return json({ review: shapeReview(full) }, 201);
   } catch (e) {

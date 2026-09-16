@@ -50,8 +50,31 @@ export function publicUser(u: User) {
   return rest;
 }
 
-export function json(data: unknown, status = 200) {
-  return Response.json(data as Record<string, unknown>, { status });
+export function json(data: unknown, status = 200, headers?: HeadersInit) {
+  return Response.json(data as Record<string, unknown>, { status, headers });
+}
+
+/**
+ * Cache headers for a public GET endpoint.
+ *
+ * Several "public" routes return *more* data to an admin (the full service
+ * catalogue, unapproved reviews), so they cannot be cached by a shared cache
+ * unconditionally — that would hand one caller's view to another. Anonymous
+ * requests are the ones worth caching anyway: they are the landing page, which
+ * is the bulk of traffic and identical for everybody.
+ *
+ * So: anonymous responses are CDN-cacheable, and anything carrying a bearer
+ * token is never stored. An admin editing the catalogue always sees their own
+ * write immediately.
+ */
+export function publicCacheHeaders(req: Request): HeadersInit {
+  if (req.headers.get("authorization")) {
+    return { "Cache-Control": "no-store" };
+  }
+  return {
+    "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+    Vary: "Authorization",
+  };
 }
 
 /**

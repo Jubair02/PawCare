@@ -5,7 +5,25 @@ interface ApiFetchOptions {
   body?: unknown;
   /** Abort signal. Rejects with an AbortError — test it with `isAbortError`. */
   signal?: AbortSignal;
+  /**
+   * Opt-in for public, cacheable GETs.
+   *
+   * Two effects: identical requests already in flight share one response
+   * instead of racing, and the browser is allowed to honour the endpoint's
+   * `Cache-Control` rather than being forced past it. Only for endpoints whose
+   * response does not depend on who is asking.
+   */
+  shared?: boolean;
 }
+
+/**
+ * In-flight public GETs, keyed by path.
+ *
+ * The landing page and the app shell mount together and both wanted
+ * `/api/settings`, so every visit opened two identical connections to a
+ * database in another region. Collapsing them costs one Map.
+ */
+const inFlightShared = new Map<string, Promise<unknown>>();
 
 /**
  * Fetch wrapper for the PawCare API.
@@ -17,6 +35,23 @@ interface ApiFetchOptions {
  * - Clears the persisted session on a 401 so a dead token cannot loop forever.
  */
 export async function apiFetch<T>(path: string, options?: ApiFetchOptions): Promise<T> {
+  const method = options?.method ?? "GET";
+
+  // Only plain, unaborted public GETs are shareable. An abort signal makes a
+  // request personal to its caller — cancelling it must not cancel somebody
+  // else's — so those always run on their own.
+  const shareable = Boolean(options?.shared) && method === "GET" && !options?.signal;
+  if (!shareable) return runFetch<T>(path, options);
+
+  const existing = inFlightShared.get(path) as Promise<T> | undefined;
+  if (existing) return existing;
+
+  const pending = runFetch<T>(path, options).finally(() => inFlightShared.delete(path));
+  inFlightShared.set(path, pending);
+  return pending;
+}
+
+async function runFetch<T>(path: string, options?: ApiFetchOptions): Promise<T> {
   const token = useAppStore.getState().token;
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -26,7 +61,9 @@ export async function apiFetch<T>(path: string, options?: ApiFetchOptions): Prom
     method: options?.method ?? "GET",
     headers,
     body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
-    cache: "no-store",
+    // Public GETs defer to the endpoint's own Cache-Control. Everything else
+    // stays uncacheable, because it is scoped to the caller's session.
+    cache: options?.shared ? "default" : "no-store",
     signal: options?.signal,
   });
 

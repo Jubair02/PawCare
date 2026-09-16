@@ -308,18 +308,33 @@ export const TREATMENT_INCLUDE = {
   provider: true,
 } satisfies Prisma.TreatmentInclude;
 
-export const REVIEW_INCLUDE = {
-  customer: true,
-  pet: true,
-  service: true,
-  provider: true,
-  appointment: true,
-} satisfies Prisma.ReviewInclude;
+/**
+ * Exactly the columns `shapeReview` returns, and nothing else.
+ *
+ * This was an `include` of five whole relations, which meant every review row
+ * dragged two full `User` records (password hash included), the owning `Pet`
+ * — whose `photo` is an inline base64 column up to 400KB — and a `Service`
+ * with its 5000-character description across the wire from Neon, only for
+ * `shapeReview` to discard all of it. The public landing page reads this
+ * endpoint on every visit, so the waste was on the hottest path in the app.
+ */
+export const REVIEW_SELECT = {
+  id: true,
+  rating: true,
+  comment: true,
+  status: true,
+  createdAt: true,
+  customer: { select: { id: true, name: true } },
+  pet: { select: { id: true, name: true } },
+  service: { select: { id: true, name: true, icon: true } },
+  provider: { select: { id: true, name: true, specialty: true } },
+  appointment: { select: { id: true, date: true } },
+} satisfies Prisma.ReviewSelect;
 
 export type AppointmentWithRelations = Prisma.AppointmentGetPayload<{ include: typeof APPOINTMENT_INCLUDE }>;
 export type PaymentWithRelations = Prisma.PaymentGetPayload<{ include: typeof PAYMENT_INCLUDE }>;
 export type TreatmentWithRelations = Prisma.TreatmentGetPayload<{ include: typeof TREATMENT_INCLUDE }>;
-export type ReviewWithRelations = Prisma.ReviewGetPayload<{ include: typeof REVIEW_INCLUDE }>;
+export type ReviewWithRelations = Prisma.ReviewGetPayload<{ select: typeof REVIEW_SELECT }>;
 export type PetWithOwner = Pet & { owner?: User; _count?: { appointments: number } };
 export type ServiceShapedInput = Service & { _count?: { appointments: number } };
 

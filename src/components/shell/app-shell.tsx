@@ -214,7 +214,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Clinic phone for the footer (public endpoint, fail-safe)
   useEffect(() => {
-    apiFetch<{ setting: SettingDTO }>("/api/settings")
+    apiFetch<{ setting: SettingDTO }>("/api/settings", { shared: true })
       .then((res) => setClinicPhone(res.setting?.phone ?? ""))
       .catch(() => undefined);
   }, []);

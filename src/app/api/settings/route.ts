@@ -1,14 +1,19 @@
 import { db } from "@/lib/db";
-import { ApiError, handleError, json, requireRole } from "@/lib/auth";
+import { ApiError, handleError, json, publicCacheHeaders, requireRole } from "@/lib/auth";
 import { EMAIL_RE, MAX_LEN, TIME_RE, asBoundedString, asNumber, asString, getSetting, readBody, timeToMinutes } from "@/app/api/_lib/shape";
 
-export const dynamic = "force-dynamic";
-
-/** GET /api/settings — public clinic settings. */
-export async function GET() {
+/**
+ * GET /api/settings — public clinic settings.
+ *
+ * A single near-static row that both the landing page and the app shell read on
+ * every load, so it is the best caching candidate in the app. `force-dynamic`
+ * was removed because the handler reads the database and is therefore dynamic
+ * regardless; it only served to opt the response out of caching entirely.
+ */
+export async function GET(req: Request) {
   try {
     const setting = await getSetting();
-    return json({ setting });
+    return json({ setting }, 200, publicCacheHeaders(req));
   } catch (e) {
     return handleError(e);
   }
