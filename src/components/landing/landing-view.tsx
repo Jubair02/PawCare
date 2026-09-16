@@ -32,30 +32,27 @@ import type { ProviderDTO, ReviewDTO, ServiceDTO, SettingDTO } from "@/lib/types
 import { cn } from "@/lib/utils";
 import Image from "next/image";
 import { SiteFooter } from "@/components/shared/site-footer";
+import {
+  CountUp,
+  DURATION,
+  EASE,
+  HoverIcon,
+  HoverLift,
+  MotionButton,
+  MotionNavButton,
+  Reveal,
+  StaggerGroup,
+  StaggerItem,
+  VIEWPORT,
+  fadeUp,
+  staggerContainer,
+} from "@/components/shared/motion";
 
 // ---------- helpers ----------
 
-function FadeIn({
-  children,
-  delay = 0,
-  className,
-}: {
-  children: React.ReactNode;
-  delay?: number;
-  className?: string;
-}) {
-  return (
-    <motion.div
-      className={className}
-      initial={{ opacity: 0, y: 24 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: "-60px" }}
-      transition={{ duration: 0.5, delay, ease: "easeOut" }}
-    >
-      {children}
-    </motion.div>
-  );
-}
+/** Hero entrance: runs once on page load, cascading top to bottom. */
+const HERO_CONTAINER = staggerContainer(0.1, 0.1);
+const HERO_ITEM_TRANSITION = { duration: DURATION.slow, ease: EASE } as const;
 
 function Stars({ value, className }: { value: number; className?: string }) {
   return (
@@ -150,11 +147,11 @@ function ServiceCard({
           </span>
         )}
       </div>
-{onBook ? (
-              <Button size="sm" className="mt-auto w-full" onClick={onBook}>
+      {onBook ? (
+        <MotionButton size="sm" className="mt-auto w-full" onClick={onBook}>
           <CalendarPlus className="size-4" />
           Book now
-        </Button>
+        </MotionButton>
       ) : null}
     </Card>
   );
@@ -163,7 +160,7 @@ function ServiceCard({
 function ProviderCard({ provider }: { provider: ProviderDTO }) {
   const isVet = provider.specialty === "VET";
   return (
-    <Card className="gap-3 p-4 text-center">
+    <Card className="gap-3 p-4 text-center h-full transition-shadow hover:shadow-md">
       <Avatar className="mx-auto h-16 w-16 border-2 border-primary/20">
         <AvatarFallback className="bg-gradient-to-br from-emerald-600 to-teal-500 text-lg font-bold text-white">
           {initials(provider.name)}
@@ -292,41 +289,45 @@ export function LandingView() {
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/70">
+      <motion.header
+        className="sticky top-0 z-30 border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/70"
+        initial={{ opacity: 0, y: -12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: DURATION.base, ease: EASE }}
+      >
         <div className="mx-auto flex h-16 w-full max-w-7xl items-center gap-3 px-4 md:px-6">
-          <button type="button" className="flex items-center gap-2.5" onClick={() => scrollToId("top")}>
+          <MotionNavButton className="flex items-center gap-2.5" onClick={() => scrollToId("top")}>
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-600 to-teal-500 text-white shadow-sm">
               <PawPrint className="size-5" />
             </div>
             <span className="text-lg font-bold tracking-tight">PawCare</span>
-          </button>
+          </MotionNavButton>
 
           <nav aria-label="Landing sections" className="ml-6 hidden items-center gap-1 md:flex">
             {LANDING_ANCHORS.map((a) => (
-              <button
+              <MotionNavButton
                 key={a.href}
-                type="button"
                 onClick={() => scrollToId(a.href.slice(1))}
                 className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 {a.label}
-              </button>
+              </MotionNavButton>
             ))}
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
             {user ? (
-              <Button onClick={() => setView(homeViewForRole(user.role))} className="min-h-11 md:min-h-9">
+              <MotionButton onClick={() => setView(homeViewForRole(user.role))} className="min-h-11 md:min-h-9">
                 Go to dashboard
-              </Button>
+              </MotionButton>
             ) : (
               <>
-                <Button variant="ghost" onClick={() => goAuth("login")} className="min-h-11 md:min-h-9">
+                <MotionButton variant="ghost" onClick={() => goAuth("login")} className="min-h-11 md:min-h-9">
                   Log in
-                </Button>
-                <Button onClick={() => goAuth("register")} className="min-h-11 md:min-h-9">
+                </MotionButton>
+                <MotionButton onClick={() => goAuth("register")} className="min-h-11 md:min-h-9">
                   Get started
-                </Button>
+                </MotionButton>
               </>
             )}
             {/* Mobile anchors */}
@@ -361,7 +362,7 @@ export function LandingView() {
             </Sheet>
           </div>
         </div>
-      </header>
+      </motion.header>
 
       <main id="top" className="relative overflow-hidden">
         {/* decorative blobs */}
@@ -374,42 +375,61 @@ export function LandingView() {
         {/* Hero */}
         <section className="mx-auto w-full max-w-7xl px-4 pb-16 pt-10 md:px-6 md:pt-16">
           <div className="grid items-center gap-10 lg:grid-cols-2">
-            <FadeIn>
-              <Badge variant="outline" className="border-amber-200 dark:border-amber-900 bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-200">
-                <Sparkles className="size-3" /> Trusted by 500+ pet parents
-              </Badge>
-              <h1 className="mt-4 text-4xl font-extrabold leading-tight tracking-tight sm:text-5xl">
+            <motion.div variants={HERO_CONTAINER} initial="hidden" animate="visible">
+              <motion.div variants={fadeUp} transition={HERO_ITEM_TRANSITION}>
+                <Badge variant="outline" className="border-amber-200 dark:border-amber-900 bg-amber-100 dark:bg-amber-950/50 text-amber-800 dark:text-amber-200">
+                  <Sparkles className="size-3" /> Trusted by 500+ pet parents
+                </Badge>
+              </motion.div>
+              <motion.h1
+                variants={fadeUp}
+                transition={HERO_ITEM_TRANSITION}
+                className="mt-4 text-4xl font-extrabold leading-tight tracking-tight sm:text-5xl"
+              >
                 Expert care for your{" "}
                 <span className="bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent">
                   furry, feathery
                 </span>{" "}
                 friends
-              </h1>
-              <p className="mt-4 max-w-lg text-base text-muted-foreground sm:text-lg">
+              </motion.h1>
+              <motion.p
+                variants={fadeUp}
+                transition={HERO_ITEM_TRANSITION}
+                className="mt-4 max-w-lg text-base text-muted-foreground sm:text-lg"
+              >
                 Book trusted vet consultations, grooming and diagnostics in minutes. Transparent pricing,
                 real reviews, and complete medical records — all in one friendly platform.
-              </p>
-              <div className="mt-6 flex flex-wrap gap-3">
-                <Button size="lg" onClick={bookNow} className="min-h-11">
+              </motion.p>
+              <motion.div variants={fadeUp} transition={HERO_ITEM_TRANSITION} className="mt-6 flex flex-wrap gap-3">
+                <MotionButton size="lg" onClick={bookNow} className="min-h-11">
                   <CalendarPlus className="size-4" />
                   {canBook ? "Book an appointment" : "Go to your dashboard"}
-                </Button>
-                <Button size="lg" variant="outline" onClick={() => scrollToId("services")} className="min-h-11">
+                </MotionButton>
+                <MotionButton size="lg" variant="outline" onClick={() => scrollToId("services")} className="min-h-11">
                   Browse services
-                </Button>
-              </div>
+                </MotionButton>
+              </motion.div>
               {avgRating !== null ? (
-                <div className="mt-6 flex flex-wrap items-center gap-3">
+                <motion.div
+                  variants={fadeUp}
+                  transition={HERO_ITEM_TRANSITION}
+                  className="mt-6 flex flex-wrap items-center gap-3"
+                >
                   <Stars value={Math.round(avgRating)} />
                   <span className="text-sm font-semibold">{avgRating.toFixed(1)} avg rating</span>
                   <span className="text-sm text-muted-foreground">
                     · from {reviewCount} verified {reviewCount === 1 ? "review" : "reviews"}
                   </span>
-                </div>
+                </motion.div>
               ) : null}
-            </FadeIn>
+            </motion.div>
 
-            <FadeIn delay={0.15} className="relative">
+            <motion.div
+              className="relative"
+              initial={{ opacity: 0, y: 24, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ duration: DURATION.slow + 0.1, delay: 0.25, ease: EASE }}
+            >
               <div className="relative">
                 <Image
                   src="/images/hero.png"
@@ -422,8 +442,9 @@ export function LandingView() {
                 />
                 {/* floating card: next available */}
                 <motion.div
-                  animate={{ y: [0, -8, 0] }}
-                  transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: DURATION.base, delay: 0.7, ease: EASE }}
                   className="absolute -right-3 top-6 rounded-2xl border bg-card/95 p-3 shadow-lg backdrop-blur sm:-right-6"
                 >
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -441,8 +462,9 @@ export function LandingView() {
                 </motion.div>
                 {/* floating card: happy clients */}
                 <motion.div
-                  animate={{ y: [0, 8, 0] }}
-                  transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", delay: 0.6 }}
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: DURATION.base, delay: 0.85, ease: EASE }}
                   className="absolute -bottom-5 left-4 flex items-center gap-3 rounded-2xl border bg-card/95 p-3 shadow-lg backdrop-blur sm:-left-6"
                 >
                   <div className="flex -space-x-2">
@@ -466,30 +488,32 @@ export function LandingView() {
                   </div>
                 </motion.div>
               </div>
-            </FadeIn>
+            </motion.div>
           </div>
         </section>
 
         {/* Stats strip */}
         <section className="mx-auto w-full max-w-7xl px-4 md:px-6">
-          <FadeIn>
+          <Reveal>
             <div className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border bg-border md:grid-cols-4">
               {liveStats.map((s) => (
                 <div key={s.label} className="flex flex-col items-center gap-1 bg-card p-6 text-center">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
                     <s.icon className="size-5" />
                   </div>
-                  <p className="mt-1 text-2xl font-bold tracking-tight">{s.value}</p>
+                  <p className="mt-1 text-2xl font-bold tracking-tight tabular-nums">
+                    <CountUp value={s.value} />
+                  </p>
                   <p className="text-xs text-muted-foreground">{s.label}</p>
                 </div>
               ))}
             </div>
-          </FadeIn>
+          </Reveal>
         </section>
 
         {/* Services */}
         <section id="services" className="mx-auto w-full max-w-7xl scroll-mt-20 px-4 py-16 md:px-6">
-          <FadeIn>
+          <Reveal>
             <div className="mb-8 text-center">
               <Badge variant="outline" className="border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-200">
                 Our services
@@ -499,7 +523,7 @@ export function LandingView() {
                 From routine check-ups to a full spa day — transparent prices, real reviews, instant booking.
               </p>
             </div>
-          </FadeIn>
+          </Reveal>
           {services === null ? (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {Array.from({ length: 4 }).map((_, i) => (
@@ -517,49 +541,53 @@ export function LandingView() {
               Services are being prepared — please check back soon.
             </p>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {services.map((s, i) => (
-                <FadeIn key={s.id} delay={Math.min(i * 0.05, 0.3)} className="h-full">
-                  <ServiceCard service={s} onBook={canBook ? bookNow : undefined} />
-                </FadeIn>
+            <StaggerGroup className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" stagger={0.06}>
+              {services.map((s) => (
+                <StaggerItem key={s.id} className="h-full">
+                  <HoverLift className="h-full">
+                    <ServiceCard service={s} onBook={canBook ? bookNow : undefined} />
+                  </HoverLift>
+                </StaggerItem>
               ))}
-            </div>
+            </StaggerGroup>
           )}
         </section>
 
         {/* How it works */}
         <section id="how" className="border-y bg-muted/40">
           <div className="mx-auto w-full max-w-7xl scroll-mt-20 px-4 py-16 md:px-6">
-            <FadeIn>
+            <Reveal>
               <div className="mb-8 text-center">
                 <h2 className="text-3xl font-bold tracking-tight">How it works</h2>
                 <p className="mx-auto mt-2 max-w-xl text-muted-foreground">
                   Four simple steps between you and a happy, healthy pet.
                 </p>
               </div>
-            </FadeIn>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            </Reveal>
+            <StaggerGroup className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {STEPS.map((step, i) => (
-                <FadeIn key={step.title} delay={i * 0.08} className="h-full">
-                  <Card className="relative h-full gap-3 p-6">
-                    <span className="absolute right-4 top-4 text-4xl font-extrabold text-muted-foreground/10">
-                      {i + 1}
-                    </span>
-                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-600 to-teal-500 text-white shadow-sm">
-                      <step.icon className="size-5" />
-                    </div>
-                    <h3 className="font-semibold">{step.title}</h3>
-                    <p className="text-sm text-muted-foreground">{step.description}</p>
-                  </Card>
-                </FadeIn>
+                <StaggerItem key={step.title} className="h-full">
+                  <HoverLift className="h-full">
+                    <Card className="relative h-full gap-3 p-6 transition-shadow hover:shadow-md">
+                      <span className="absolute right-4 top-4 text-4xl font-extrabold text-muted-foreground/10">
+                        {i + 1}
+                      </span>
+                      <HoverIcon className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-600 to-teal-500 text-white shadow-sm">
+                        <step.icon className="size-5" />
+                      </HoverIcon>
+                      <h3 className="font-semibold">{step.title}</h3>
+                      <p className="text-sm text-muted-foreground">{step.description}</p>
+                    </Card>
+                  </HoverLift>
+                </StaggerItem>
               ))}
-            </div>
+            </StaggerGroup>
           </div>
         </section>
 
         {/* Team */}
         <section id="team" className="mx-auto w-full max-w-7xl scroll-mt-20 px-4 py-16 md:px-6">
-          <FadeIn>
+          <Reveal>
             <div className="mb-8 text-center">
               <Badge variant="outline" className="border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-200">
                 Our team
@@ -569,7 +597,7 @@ export function LandingView() {
                 Experienced veterinarians and certified groomers who treat pets like family.
               </p>
             </div>
-          </FadeIn>
+          </Reveal>
           {providers === null ? (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -584,27 +612,29 @@ export function LandingView() {
           ) : providers.length === 0 ? (
             <p className="text-center text-muted-foreground">Our team list is being updated — check back soon.</p>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {providers.map((p, i) => (
-                <FadeIn key={p.id} delay={i * 0.08} className="h-full">
-                  <ProviderCard provider={p} />
-                </FadeIn>
+            <StaggerGroup className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {providers.map((p) => (
+                <StaggerItem key={p.id} className="h-full">
+                  <HoverLift className="h-full">
+                    <ProviderCard provider={p} />
+                  </HoverLift>
+                </StaggerItem>
               ))}
-            </div>
+            </StaggerGroup>
           )}
         </section>
 
         {/* Reviews */}
         <section id="reviews" className="border-y bg-muted/40">
           <div className="mx-auto w-full max-w-7xl scroll-mt-20 px-4 py-16 md:px-6">
-            <FadeIn>
+            <Reveal>
               <div className="mb-8 text-center">
                 <h2 className="text-3xl font-bold tracking-tight">Loved by pet parents</h2>
                 <p className="mx-auto mt-2 max-w-xl text-muted-foreground">
                   Real reviews from verified visits on PawCare.
                 </p>
               </div>
-            </FadeIn>
+            </Reveal>
             {reviews === null ? (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
                 {Array.from({ length: 3 }).map((_, i) => (
@@ -621,20 +651,20 @@ export function LandingView() {
                 No reviews published yet — be the first to share your experience!
               </p>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {reviews.map((r, i) => (
-                  <FadeIn key={r.id} delay={i * 0.06} className="h-full">
+              <StaggerGroup className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" stagger={0.06}>
+                {reviews.map((r) => (
+                  <StaggerItem key={r.id} className="h-full">
                     <ReviewCard review={r} />
-                  </FadeIn>
+                  </StaggerItem>
                 ))}
-              </div>
+              </StaggerGroup>
             )}
           </div>
         </section>
 
         {/* CTA banner */}
         <section className="mx-auto w-full max-w-7xl px-4 py-16 md:px-6">
-          <FadeIn>
+          <Reveal>
             <div className="overflow-hidden rounded-3xl bg-gradient-to-br from-emerald-600 to-teal-500 shadow-xl">
               <div className="grid items-center gap-6 p-8 md:grid-cols-2 md:p-12">
                 <div>
@@ -646,34 +676,42 @@ export function LandingView() {
                       ? "Create a free account, add your companions and book your first visit in under two minutes."
                       : "Your schedule, patients and records are waiting in your dashboard."}
                   </p>
-                  <Button
+                  <MotionButton
                     size="lg"
                     onClick={bookNow}
                     className="mt-6 min-h-11 bg-white text-emerald-700 dark:text-emerald-200 hover:bg-emerald-50 dark:bg-emerald-950/40"
                   >
                     <CalendarPlus className="size-4" />
                     {canBook ? "Book an appointment" : "Go to your dashboard"}
-                  </Button>
+                  </MotionButton>
                 </div>
                 <div className="overflow-hidden rounded-2xl shadow-lg">
-                  <Image
-                    src="/images/spa.png"
-                    alt="A relaxed pet enjoying a spa grooming session"
-                    width={1024}
-                    height={1024}
-                    sizes="(max-width: 768px) 100vw, 50vw"
-                    className="h-56 w-full object-cover md:h-64"
-                  />
+                  {/* Settles from a slight zoom as the banner reveals; clipped by the rounded wrapper. */}
+                  <motion.div
+                    initial={{ scale: 1.06 }}
+                    whileInView={{ scale: 1 }}
+                    viewport={VIEWPORT}
+                    transition={{ duration: 1, ease: EASE }}
+                  >
+                    <Image
+                      src="/images/spa.png"
+                      alt="A relaxed pet enjoying a spa grooming session"
+                      width={1024}
+                      height={1024}
+                      sizes="(max-width: 768px) 100vw, 50vw"
+                      className="h-56 w-full object-cover md:h-64"
+                    />
+                  </motion.div>
                 </div>
               </div>
             </div>
-          </FadeIn>
+          </Reveal>
         </section>
       </main>
 
       {/* Footer */}
       <footer className="bg-emerald-950 text-emerald-100">
-        <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-12 md:grid-cols-3 md:px-6">
+        <Reveal className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-12 md:grid-cols-3 md:px-6">
           <div>
             <div className="flex items-center gap-2.5">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-400 text-white">
@@ -734,7 +772,7 @@ export function LandingView() {
               </li>
             </ul>
           </div>
-        </div>
+        </Reveal>
         <SiteFooter as="div" tone="dark" note={<p>Made with ❤ for pets</p>} />
       </footer>
     </div>
